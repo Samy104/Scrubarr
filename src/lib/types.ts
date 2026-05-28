@@ -55,6 +55,12 @@ export interface DupItem {
   savingsHuman: string;
   versionCount: number;
   thumb?: string;
+  /** For episode items: the show's poster (grandparentThumb). Episode thumbs
+   * themselves are scene stills and not visually useful for ID at a glance. */
+  showThumb?: string;
+  /** RatingKey to render the poster against. For episodes this is the show's
+   * rating key, not the episode's. Used by the <MediaPoster> component. */
+  posterRatingKey?: string;
 }
 
 export interface RuleMatch {
@@ -154,6 +160,7 @@ export interface CleanupCandidate {
   studio: string | null;
   genres: string[];
   collections: string[];
+  thumb?: string | null;
   viewCount: number;
   lastViewedAt: number | null;
   rating: number | null;
@@ -174,6 +181,7 @@ export interface ShowSummary {
   showTitle: string;
   sectionTitle: string;
   sectionType: 'show';
+  thumb?: string | null;
   episodeCount: number;
   totalSize: number;
   totalSizeHuman: string;

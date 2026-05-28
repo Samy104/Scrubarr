@@ -7,6 +7,7 @@ import type { CleanupCandidate, CleanupRuleDTO } from '@/lib/types';
 import { RefreshCw, ShieldCheck, Trash2, Search, AlertTriangle, Sparkles, ExternalLink, EyeOff, Wand2, X } from 'lucide-react';
 import { useNotifications } from '@/lib/notifications';
 import { useConfirm } from '@/lib/confirm';
+import { MediaPoster } from '@/components/MediaPoster';
 
 interface Props { scope: 'movie' | 'show' }
 
@@ -494,6 +495,12 @@ function CandidateRow({
           title={c.isCandidate ? 'Select for cleanup' : 'Not a candidate (ignored, no eligibility rule matched, or exception applies)'}
         />
       </label>
+      <MediaPoster
+        ratingKey={c.ratingKey}
+        title={c.title}
+        kind={scope}
+        width={40}
+      />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="font-display font-semibold tracking-tight text-[15px] truncate">{c.title}</div>

@@ -99,6 +99,7 @@ export function buildShowSummaries(items: DupItem[], prefs: PrefRow[]): ShowSumm
         showTitle: it.showTitle ?? '',
         sectionTitle: it.section,
         sectionType: 'show',
+        thumb: it.showThumb ?? null,
         episodeCount: 0,
         totalSize: 0,
         totalSizeHuman: '0 B',
@@ -110,6 +111,8 @@ export function buildShowSummaries(items: DupItem[], prefs: PrefRow[]): ShowSumm
         needsReviewCount: 0,
       });
     }
+    const summary = byKey.get(k)!;
+    if (!summary.thumb && it.showThumb) summary.thumb = it.showThumb;
     const s = byKey.get(k)!;
     s.episodeCount++;
     s.totalSize += it.totalSize;

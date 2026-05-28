@@ -120,6 +120,11 @@ export async function refreshDupes(): Promise<{ count: number; durationSec: numb
               seasonEpisode: sxe,
               parentRatingKey: ep.parentRatingKey,
               grandparentRatingKey: ep.grandparentRatingKey,
+              // Use the show's poster — episode thumbs are scene stills
+              showThumb: ep.grandparentThumb ?? undefined,
+              posterRatingKey: ep.grandparentRatingKey
+                ? String(ep.grandparentRatingKey)
+                : undefined,
             }),
           );
         }
@@ -179,6 +184,9 @@ function toDupItem(
 ): DupItem {
   const totalSize = media.reduce((a, m) => a + m.size, 0);
   const largest = media[0]?.size ?? 0;
+  // Movies use their own thumb; episodes get a showThumb + posterRatingKey
+  // pointing at the show, supplied through `extra`.
+  const defaultPosterRk = type === 'movie' ? String(raw.ratingKey) : undefined;
   return {
     ratingKey: String(raw.ratingKey),
     type,
@@ -197,6 +205,7 @@ function toDupItem(
     savingsHuman: humanSize(totalSize - largest),
     versionCount: media.length,
     thumb: raw.thumb,
+    posterRatingKey: defaultPosterRk,
     ...extra,
   };
 }

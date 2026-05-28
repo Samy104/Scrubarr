@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, EyeOff, Trash2, Check, Sparkles, Wand2 } fro
 import { humanSize } from '@/lib/format';
 import type { DupItem, MediaVersion } from '@/lib/types';
 import { useConfirm } from '@/lib/confirm';
+import { MediaPoster } from './MediaPoster';
 
 interface Props {
   item: DupItem;
@@ -26,6 +27,12 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
     <div className="bg-panel border border-border rounded-lg p-4 mb-2.5 hover:border-text-dim/40 transition-colors">
       <div className="flex items-center gap-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
         {open ? <ChevronDown size={18} className="text-text-dim" /> : <ChevronRight size={18} className="text-text-dim" />}
+        <MediaPoster
+          ratingKey={item.posterRatingKey ?? (item.type === 'episode' ? item.grandparentRatingKey : item.ratingKey)}
+          title={item.showTitle || item.title}
+          kind={item.type === 'movie' ? 'movie' : 'show'}
+          width={40}
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-base font-semibold truncate">

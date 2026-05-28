@@ -24,3 +24,7 @@ npm-debug.log*
 # Build cache
 .tsbuildinfo
 next-env.d.ts
+
+# Playwright / test artifacts
+.playwright-mcp/
+test-results/
