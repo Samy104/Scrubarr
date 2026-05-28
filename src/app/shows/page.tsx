@@ -10,6 +10,7 @@ const CODECS = ['', 'hevc', 'h264', 'av1', 'mpeg4'];
 export default function ShowsPage() {
   const [shows, setShows] = useState<ShowSummary[]>([]);
   const [lib, setLib] = useState<'all' | 'show' | 'anime'>('all');
+  const [prefFilter, setPrefFilter] = useState<'all' | 'with' | 'without'>('all');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -32,10 +33,21 @@ export default function ShowsPage() {
     return () => clearInterval(t);
   }, [lib]);
 
-  const filtered = useMemo(
-    () => shows.filter((s) => s.showTitle.toLowerCase().includes(query.toLowerCase())),
-    [shows, query],
-  );
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return shows.filter((s) => {
+      if (!s.showTitle.toLowerCase().includes(q)) return false;
+      if (prefFilter === 'with' && !s.preference) return false;
+      if (prefFilter === 'without' && s.preference) return false;
+      return true;
+    });
+  }, [shows, query, prefFilter]);
+
+  const prefCount = useMemo(() => {
+    let withPref = 0;
+    for (const s of shows) if (s.preference) withPref++;
+    return { withPref, withoutPref: shows.length - withPref };
+  }, [shows]);
 
   const totals = useMemo(() => {
     return shows.reduce(
@@ -142,6 +154,16 @@ export default function ShowsPage() {
           <option value="all">All libraries</option>
           <option value="show">TV Shows</option>
           <option value="anime">Anime</option>
+        </select>
+        <select
+          value={prefFilter}
+          onChange={(e) => setPrefFilter(e.target.value as 'all' | 'with' | 'without')}
+          className="px-3 py-1.5 bg-panel-2 border border-border rounded text-sm"
+          title="Filter by preference state"
+        >
+          <option value="all">All shows ({shows.length})</option>
+          <option value="with">With preference ({prefCount.withPref})</option>
+          <option value="without">Without preference ({prefCount.withoutPref})</option>
         </select>
         <div className="text-xs text-text-dim">
           {filtered.length} shown

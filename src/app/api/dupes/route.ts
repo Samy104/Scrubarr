@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (!cache.scannedAt && !cache.scanning) refreshDupes().catch(() => {});
 
   const { searchParams } = new URL(req.url);
-  const library = searchParams.get('library'); // movie | show | anime
+  const library = searchParams.get('library'); // movie | show | anime | episodes
   const offset = Number(searchParams.get('offset') ?? 0);
   const limit = Math.min(Number(searchParams.get('limit') ?? 200), 1000);
 
@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   else if (library === 'show')
     items = items.filter((x) => x.sectionType === 'show' && !x.section.toLowerCase().includes('anime'));
   else if (library === 'anime') items = items.filter((x) => x.section.toLowerCase().includes('anime'));
+  else if (library === 'episodes') items = items.filter((x) => x.sectionType !== 'movie');
 
   const totalForFilter = items.length;
   const sliced = items.slice(offset, offset + limit);

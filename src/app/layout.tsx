@@ -1,9 +1,9 @@
 import './globals.css';
-import { Bricolage_Grotesque, Public_Sans, JetBrains_Mono } from 'next/font/google';
+import { Outfit, Manrope, JetBrains_Mono } from 'next/font/google';
 import { Sidebar } from '@/components/Sidebar';
 
-const display = Bricolage_Grotesque({ subsets: ['latin'], variable: '--font-display', display: 'swap', weight: ['500', '600', '700'] });
-const sans = Public_Sans({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
+const display = Outfit({ subsets: ['latin'], variable: '--font-display', display: 'swap', weight: ['500', '600', '700'] });
+const sans = Manrope({ subsets: ['latin'], variable: '--font-sans', display: 'swap', weight: ['400', '500', '600', '700'] });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
 export const metadata = {

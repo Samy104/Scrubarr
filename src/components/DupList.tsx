@@ -7,11 +7,13 @@ import { Search } from 'lucide-react';
 
 interface Props {
   /** restrict to a section type */
-  filterSection?: 'movie' | 'show' | 'anime';
+  filterSection?: 'movie' | 'show' | 'anime' | 'episodes';
   emptyTitle?: string;
+  /** extra control rendered into the filter toolbar (e.g. library dropdown) */
+  libraryFilter?: React.ReactNode;
 }
 
-export function DupList({ filterSection, emptyTitle }: Props) {
+export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
   const [cache, setCache] = useState<ScanCache | null>(null);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'savings' | 'title' | 'versions' | 'size'>('savings');
@@ -112,6 +114,7 @@ export function DupList({ filterSection, emptyTitle }: Props) {
             className="w-full pl-8 pr-3 py-1.5 bg-panel-2 border border-border rounded-md text-sm focus:outline-none focus:border-accent"
           />
         </div>
+        {libraryFilter}
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as typeof sort)}
