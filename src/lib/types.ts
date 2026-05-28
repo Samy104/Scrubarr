@@ -110,6 +110,65 @@ export interface SeriesPreferenceDTO {
   notes: string | null;
 }
 
+export interface CleanupRuleDTO {
+  id: number;
+  name: string;
+  description: string | null;
+  scope: 'movie' | 'show';
+  kind: 'exception' | 'eligibility';
+  priority: number;
+  enabled: boolean;
+  match: CleanupRuleMatch;
+  conditions: CleanupRuleConditions;
+}
+
+export interface CleanupRuleMatch {
+  titleRegex?: string;
+  yearMin?: number;
+  yearMax?: number;
+  libraries?: string[];
+  genres?: string[];
+  collections?: string[];
+  studios?: string[];
+  contentRatings?: string[];
+}
+
+export interface NumRange { min?: number; max?: number }
+
+export interface CleanupRuleConditions {
+  viewCount?: NumRange;
+  daysSinceLastView?: NumRange;
+  neverViewed?: boolean;
+  rating?: NumRange;
+  userRating?: NumRange;
+  audienceRating?: NumRange;
+  showCompletion?: NumRange; // viewedLeafCount / leafCount (0..1)
+}
+
+export interface CleanupCandidate {
+  ratingKey: string;
+  title: string;
+  year: number | null;
+  sectionTitle: string;
+  scope: 'movie' | 'show';
+  studio: string | null;
+  genres: string[];
+  collections: string[];
+  viewCount: number;
+  lastViewedAt: number | null;
+  rating: number | null;
+  userRating: number | null;
+  audienceRating: number | null;
+  contentRating: string | null;
+  totalSize: number;
+  /// Show-only
+  leafCount?: number;
+  viewedLeafCount?: number;
+  /// All media versions for this item (movies have 1+, shows have many via children — not loaded here)
+  media: MediaVersion[];
+  matchedRules: { id: number; name: string; kind: 'exception' | 'eligibility' }[];
+}
+
 export interface ShowSummary {
   showRatingKey: string;
   showTitle: string;

@@ -1,6 +1,8 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
-import { Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play } from 'lucide-react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import {
+  Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play, X,
+} from 'lucide-react';
 import { humanSize } from '@/lib/format';
 import type { ShowSummary, SeriesPreferenceDTO } from '@/lib/types';
 import { useNotifications } from '@/lib/notifications';
@@ -8,12 +10,15 @@ import { useNotifications } from '@/lib/notifications';
 const RESOLUTIONS = ['', '2160', '1080', '720', '480'];
 const CODECS = ['', 'hevc', 'h264', 'av1', 'mpeg4'];
 
+interface Progress { done: number; total: number; ok: number; failed: number; current?: string }
+
 export default function ShowsPage() {
   const [shows, setShows] = useState<ShowSummary[]>([]);
   const [lib, setLib] = useState<'all' | 'show' | 'anime'>('all');
   const [prefFilter, setPrefFilter] = useState<'all' | 'with' | 'without'>('all');
   const [query, setQuery] = useState('');
   const { notify } = useNotifications();
+
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scannedAt, setScannedAt] = useState<number | null>(null);
@@ -83,13 +88,10 @@ export default function ShowsPage() {
       .filter(Boolean)
       .join(' ');
     notify({ kind: 'success', title: `Preference saved for ${s.showTitle}`, body: summary || 'any version' });
-    // Preferences are re-applied to cached items on every /api/shows GET, so no
-    // Plex rescan is needed for the autoClean count to update.
     await load();
   };
 
-  const handleDelete = async (showRatingKey: string) => {
-    if (!confirm('Remove preference for this show?')) return;
+  const handleDeletePref = async (showRatingKey: string) => {
     const target = shows.find((s) => s.showRatingKey === showRatingKey);
     await fetch(`/api/series-preference?showRatingKey=${encodeURIComponent(showRatingKey)}`, {
       method: 'DELETE',
@@ -98,23 +100,42 @@ export default function ShowsPage() {
     await load();
   };
 
-  const handleAutoClean = async (s: ShowSummary) => {
-    if (s.autoCleanCount === 0) return;
-    if (
-      !confirm(
-        `Auto-clean ${s.autoCleanCount} episode(s) of "${s.showTitle}"?\n\nThis deletes every non-preferred version on Plex + disk. Cannot be undone.`,
-      )
-    )
-      return;
-    const r = await fetch(`/api/shows/${s.showRatingKey}/auto-clean`, { method: 'POST' });
-    const d = await r.json();
-    notify({
-      kind: d.failed ? 'warn' : 'success',
-      title: `Auto-clean: ${s.showTitle}`,
-      body: `${d.deleted} versions deleted${d.failed ? `, ${d.failed} failed` : ''}`,
-    });
-    await fetch('/api/rescan', { method: 'POST' });
-    setTimeout(load, 1500);
+  /**
+   * Run a bulk auto-clean as an NDJSON stream so the caller can render
+   * incremental progress. The promise resolves with the final tallies.
+   */
+  const runAutoClean = async (
+    s: ShowSummary,
+    onProgress: (p: Progress) => void,
+  ): Promise<{ deleted: number; failed: number }> => {
+    const resp = await fetch(`/api/shows/${s.showRatingKey}/auto-clean`, { method: 'POST' });
+    if (!resp.body) return { deleted: 0, failed: 0 };
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let total = 0, ok = 0, failed = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === 'start') { total = ev.total; onProgress({ done: 0, total, ok: 0, failed: 0 }); }
+          else if (ev.type === 'progress') {
+            ok = ev.ok; failed = ev.failed;
+            onProgress({ done: ev.done, total, ok, failed, current: ev.current });
+          } else if (ev.type === 'done') {
+            ok = ev.deleted; failed = ev.failed;
+          }
+        } catch {}
+      }
+    }
+    return { deleted: ok, failed };
   };
 
   return (
@@ -187,6 +208,9 @@ export default function ShowsPage() {
           Set a preferred version per series (e.g. <span className="text-text font-medium">Westworld = 1080p REMUX</span>).
           Episodes that have the preferred version are marked <span className="text-good">auto-clean</span>; episodes
           without it stay in the normal TV/Anime list for manual review.
+          <span className="block mt-1 text-text-dim/80 text-xs">
+            Tip: <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">Shift</kbd>+click Auto-clean to skip the confirmation.
+          </span>
         </p>
         {loading ? (
           <p className="text-text-dim text-center py-12">Loading…</p>
@@ -199,8 +223,17 @@ export default function ShowsPage() {
                 key={s.showRatingKey}
                 show={s}
                 onSave={handleSave}
-                onDelete={handleDelete}
-                onAutoClean={handleAutoClean}
+                onDelete={handleDeletePref}
+                runAutoClean={runAutoClean}
+                onAfterClean={async (s, result) => {
+                  notify({
+                    kind: result.failed ? 'warn' : 'success',
+                    title: `Auto-clean: ${s.showTitle}`,
+                    body: `${result.deleted} versions deleted${result.failed ? `, ${result.failed} failed` : ''}`,
+                  });
+                  await fetch('/api/rescan', { method: 'POST' });
+                  setTimeout(load, 1500);
+                }}
               />
             ))}
           </div>
@@ -233,18 +266,37 @@ function ShowCard({
   show,
   onSave,
   onDelete,
-  onAutoClean,
+  runAutoClean,
+  onAfterClean,
 }: {
   show: ShowSummary;
   onSave: (s: ShowSummary, p: Partial<SeriesPreferenceDTO>) => Promise<void>;
   onDelete: (rk: string) => Promise<void>;
-  onAutoClean: (s: ShowSummary) => Promise<void>;
+  runAutoClean: (s: ShowSummary, onProgress: (p: Progress) => void) => Promise<{ deleted: number; failed: number }>;
+  onAfterClean: (s: ShowSummary, r: { deleted: number; failed: number }) => Promise<void>;
 }) {
   const [open, setOpen] = useState(!!show.preference);
   const [res, setRes] = useState(show.preference?.preferredResolution ?? '');
   const [codec, setCodec] = useState(show.preference?.preferredCodec ?? '');
   const [remux, setRemux] = useState(show.preference?.preferRemux ?? false);
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!confirmOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) setConfirmOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setConfirmOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [confirmOpen]);
 
   const resList = Object.entries(show.resolutionMix).sort((a, b) => b[1] - a[1]);
   const normRes = (s: string) => {
@@ -261,6 +313,24 @@ function ShowCard({
       : (show.preference.preferredResolution ?? '') !== res ||
         (show.preference.preferredCodec ?? '') !== codec ||
         show.preference.preferRemux !== remux;
+
+  const executeClean = async () => {
+    setConfirmOpen(false);
+    setBusy(true);
+    setProgress({ done: 0, total: show.autoCleanCount, ok: 0, failed: 0 });
+    try {
+      const result = await runAutoClean(show, setProgress);
+      await onAfterClean(show, result);
+    } finally {
+      setBusy(false);
+      setTimeout(() => setProgress(null), 1500);
+    }
+  };
+
+  const onAutoCleanClick = (e: React.MouseEvent) => {
+    if (e.shiftKey) { void executeClean(); return; }
+    setConfirmOpen((o) => !o);
+  };
 
   return (
     <div className="bg-panel border border-border rounded-lg p-3.5 hover:border-text-dim/40 transition-colors">
@@ -311,19 +381,81 @@ function ShowCard({
           </div>
         </div>
         {show.autoCleanCount > 0 && (
-          <button
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              await onAutoClean(show);
-              setBusy(false);
-            }}
-            className="px-3 py-1.5 bg-good text-accent-ink font-semibold rounded text-xs flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
-            title={`Delete every non-preferred version on ${show.autoCleanCount} episode(s)`}
-          >
-            <Play size={11} />
-            Auto-clean {show.autoCleanCount}
-          </button>
+          <div className="relative flex flex-col items-end gap-1.5" ref={popoverRef}>
+            <button
+              disabled={busy}
+              onClick={onAutoCleanClick}
+              className={`px-3 py-1.5 font-semibold rounded text-xs flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap transition-colors ${
+                confirmOpen
+                  ? 'bg-good/80 text-accent-ink'
+                  : 'bg-good text-accent-ink hover:opacity-90'
+              }`}
+              title={`Delete every non-preferred version on ${show.autoCleanCount} episode(s). Shift+click skips this prompt.`}
+            >
+              <Play size={11} />
+              {progress
+                ? `${progress.done} / ${progress.total}`
+                : `Auto-clean ${show.autoCleanCount}`}
+            </button>
+            {progress && (
+              <div className="w-full max-w-[220px] h-1 bg-panel-2 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-good transition-[width] duration-150"
+                  style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
+                />
+              </div>
+            )}
+            {progress?.current && (
+              <div className="text-[10px] text-text-dim truncate max-w-[220px]" title={progress.current}>
+                {progress.current}
+              </div>
+            )}
+
+            {confirmOpen && (
+              <div
+                role="dialog"
+                className="absolute right-0 top-full mt-2 w-[280px] bg-panel border border-border rounded-lg shadow-xl z-20 origin-top-right"
+                style={{ animation: 'mvPopIn 120ms ease-out' }}
+              >
+                <div className="px-3.5 py-2.5 border-b border-border flex items-center justify-between">
+                  <div className="text-sm font-display font-semibold tracking-tight">Confirm auto-clean</div>
+                  <button
+                    onClick={() => setConfirmOpen(false)}
+                    className="text-text-dim hover:text-text"
+                    aria-label="Cancel"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="px-3.5 py-2.5 text-xs text-text-dim space-y-2">
+                  <div>
+                    Delete every non-preferred version on{' '}
+                    <span className="text-text font-mono">{show.autoCleanCount}</span> episode
+                    {show.autoCleanCount === 1 ? '' : 's'} of{' '}
+                    <span className="text-text font-medium">{show.showTitle}</span>.
+                  </div>
+                  <div className="text-warn">This cannot be undone.</div>
+                  <div className="text-[10px] text-text-dim/80 pt-1">
+                    Hold <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">Shift</kbd> while clicking next time to skip this prompt.
+                  </div>
+                </div>
+                <div className="px-3 py-2 border-t border-border flex items-center justify-end gap-2 bg-panel-2/50">
+                  <button
+                    onClick={() => setConfirmOpen(false)}
+                    className="px-2.5 py-1 text-xs rounded border border-border hover:bg-panel-2"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={executeClean}
+                    className="px-2.5 py-1 text-xs rounded bg-good text-accent-ink font-semibold hover:opacity-90 inline-flex items-center gap-1.5"
+                  >
+                    <Play size={11} /> Delete {show.autoCleanCount}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -383,6 +515,9 @@ function ShowCard({
                   enabled: true,
                 });
                 setBusy(false);
+                // Auto-collapse the editor once the preference is saved so the
+                // card reverts to its compact view.
+                setOpen(false);
               }}
               className="px-3 py-1.5 bg-accent text-accent-ink font-semibold rounded text-sm flex items-center gap-1.5 disabled:opacity-50"
             >

@@ -65,6 +65,45 @@ model ScanState {
   lastScanDuration Int     @default(0) // seconds
 }
 
+/// Items the user has explicitly exempted from cleanup. An ignored item is
+/// never a candidate even if eligibility rules match. Separate from IgnoredItem
+/// (which guards the dedupe view) so the two flows don't bleed into each other.
+model CleanupIgnoredItem {
+  id          Int      @id @default(autoincrement())
+  ratingKey   String   @unique
+  scope       String   // movie | show
+  title       String?
+  sectionTitle String?
+  reason      String?
+  ignoredAt   DateTime @default(now())
+}
+
+/// Cleanup rules govern which movies / shows are considered candidates for
+/// deletion based on watch history and ratings. Two kinds:
+/// - 'exception'  : matching items are NEVER candidates (e.g. always keep Marvel)
+/// - 'eligibility': matching items + condition match makes them a candidate
+///                  (e.g. unwatched + rating < 5)
+model CleanupRule {
+  id             Int      @id @default(autoincrement())
+  name           String
+  description    String?
+  scope          String   // movie | show
+  kind           String   // exception | eligibility
+  priority       Int      @default(50) // lower = applied first; exceptions always win regardless
+  enabled        Boolean  @default(true)
+
+  /// Library-side filter: {titleRegex?, yearMin?, yearMax?, libraries?, genres?, collections?, studios?, contentRatings?}
+  matchJson      String   @default("{}")
+  /// Eligibility checks (ignored for exception rules):
+  /// {viewCount?: {min?, max?}, daysSinceLastView?: {min?, max?}, neverViewed?: bool,
+  ///  rating?: {min?, max?}, userRating?: {min?, max?}, audienceRating?: {min?, max?},
+  ///  showCompletion?: {min?, max?}}  // viewedLeafCount / leafCount for shows
+  conditionsJson String   @default("{}")
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 /// Per-series preference for the TV / Anime libraries.
 /// When set, the scanner marks every duplicate episode of that show as either
 /// autoClean (the preferred version exists and the others can be deleted) or

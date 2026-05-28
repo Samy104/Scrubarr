@@ -44,6 +44,36 @@ export async function getItemMeta(ratingKey: string): Promise<any | null> {
   return j?.MediaContainer?.Metadata?.[0] ?? null;
 }
 
+/** All movies in a section with watch + rating metadata (one Plex call). */
+export async function listMoviesInSection(sectionKey: string): Promise<any[]> {
+  const j = await plexFetch(
+    `/library/sections/${sectionKey}/all`,
+    { type: '1', includeGuids: '1' },
+    180_000,
+  );
+  return j?.MediaContainer?.Metadata ?? [];
+}
+
+/** All shows in a section. */
+export async function listShowsInSection(sectionKey: string): Promise<any[]> {
+  const j = await plexFetch(
+    `/library/sections/${sectionKey}/all`,
+    { type: '2', includeGuids: '1' },
+    180_000,
+  );
+  return j?.MediaContainer?.Metadata ?? [];
+}
+
+/** Delete a whole item (movie or show) and every file behind it. */
+export async function deleteItem(ratingKey: string): Promise<{ ok: boolean; msg: string }> {
+  const url = new URL(`/library/metadata/${ratingKey}`, PLEX);
+  const r = await fetch(url.toString(), {
+    method: 'DELETE',
+    headers: { 'X-Plex-Token': TOKEN },
+  });
+  return { ok: r.status === 200 || r.status === 204, msg: `HTTP ${r.status}` };
+}
+
 export async function deleteMedia(ratingKey: string, mediaId: string): Promise<{ ok: boolean; msg: string }> {
   const url = new URL(`/library/metadata/${ratingKey}/media/${mediaId}`, PLEX);
   const r = await fetch(url.toString(), {
