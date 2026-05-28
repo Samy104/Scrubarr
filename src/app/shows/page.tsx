@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play } from 'lucide-react';
 import { humanSize } from '@/lib/format';
 import type { ShowSummary, SeriesPreferenceDTO } from '@/lib/types';
+import { useNotifications } from '@/lib/notifications';
 
 const RESOLUTIONS = ['', '2160', '1080', '720', '480'];
 const CODECS = ['', 'hevc', 'h264', 'av1', 'mpeg4'];
@@ -12,6 +13,7 @@ export default function ShowsPage() {
   const [lib, setLib] = useState<'all' | 'show' | 'anime'>('all');
   const [prefFilter, setPrefFilter] = useState<'all' | 'with' | 'without'>('all');
   const [query, setQuery] = useState('');
+  const { notify } = useNotifications();
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scannedAt, setScannedAt] = useState<number | null>(null);
@@ -77,6 +79,10 @@ export default function ShowsPage() {
         notes: draft.notes ?? null,
       }),
     });
+    const summary = [draft.preferredResolution, draft.preferredCodec, draft.preferRemux ? 'prefer REMUX' : null]
+      .filter(Boolean)
+      .join(' ');
+    notify({ kind: 'success', title: `Preference saved for ${s.showTitle}`, body: summary || 'any version' });
     // Preferences are re-applied to cached items on every /api/shows GET, so no
     // Plex rescan is needed for the autoClean count to update.
     await load();
@@ -84,9 +90,11 @@ export default function ShowsPage() {
 
   const handleDelete = async (showRatingKey: string) => {
     if (!confirm('Remove preference for this show?')) return;
+    const target = shows.find((s) => s.showRatingKey === showRatingKey);
     await fetch(`/api/series-preference?showRatingKey=${encodeURIComponent(showRatingKey)}`, {
       method: 'DELETE',
     });
+    notify({ kind: 'info', title: 'Preference removed', body: target?.showTitle });
     await load();
   };
 
@@ -100,14 +108,18 @@ export default function ShowsPage() {
       return;
     const r = await fetch(`/api/shows/${s.showRatingKey}/auto-clean`, { method: 'POST' });
     const d = await r.json();
-    alert(`${d.deleted} versions deleted, ${d.failed} failed.`);
+    notify({
+      kind: d.failed ? 'warn' : 'success',
+      title: `Auto-clean: ${s.showTitle}`,
+      body: `${d.deleted} versions deleted${d.failed ? `, ${d.failed} failed` : ''}`,
+    });
     await fetch('/api/rescan', { method: 'POST' });
     setTimeout(load, 1500);
   };
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 bg-panel border-b border-border sticky top-0 z-10">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 pr-16 bg-panel border-b border-border sticky top-0 z-10">
         <Stat label="Shows" value={shows.length.toString()} />
         <Stat label="Dup episodes" value={totals.episodes.toString()} />
         <Stat label="Total dup size" value={humanSize(totals.size)} />
@@ -235,6 +247,14 @@ function ShowCard({
   const [busy, setBusy] = useState(false);
 
   const resList = Object.entries(show.resolutionMix).sort((a, b) => b[1] - a[1]);
+  const normRes = (s: string) => {
+    const t = s.toLowerCase().trim().replace(/p$/, '');
+    if (t === '4k' || t === 'uhd' || t === '2160') return '2160';
+    if (t === '1080' || t === 'fhd') return '1080';
+    if (t === '720' || t === 'hd') return '720';
+    if (t === '480' || t === 'sd') return '480';
+    return t;
+  };
   const hasUnsavedChanges =
     show.preference == null
       ? !!(res || codec || remux)
@@ -280,7 +300,7 @@ function ShowCard({
               <span
                 key={r}
                 className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
-                  r === res
+                  res && normRes(r) === normRes(res)
                     ? 'bg-accent/15 text-accent border-accent/40'
                     : 'bg-panel-2 text-text-dim border-border'
                 }`}

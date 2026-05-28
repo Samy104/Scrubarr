@@ -14,13 +14,28 @@ interface PrefRow {
 }
 
 /**
+ * Plex reports resolutions inconsistently: "4k" or "uhd" instead of "2160",
+ * sometimes with a trailing "p". The dropdown saves "2160" / "1080" / "720".
+ * Normalize both sides so the comparison is robust.
+ */
+function normRes(s: string | null | undefined): string {
+  if (!s) return '';
+  const t = s.toLowerCase().trim().replace(/p$/, '');
+  if (t === '4k' || t === 'uhd' || t === '2160') return '2160';
+  if (t === '1080' || t === 'fhd') return '1080';
+  if (t === '720' || t === 'hd') return '720';
+  if (t === '480' || t === 'sd') return '480';
+  return t;
+}
+
+/**
  * Hard filter: resolution and codec are required matches when set. REMUX is
  * NOT a hard filter — it is a soft tiebreaker applied during ranking, so a
  * series with "prefer REMUX" still auto-cleans episodes that only have a
  * non-REMUX version at the preferred resolution.
  */
 function matchesPreference(m: MediaVersion, pref: PrefRow): boolean {
-  if (pref.preferredResolution && (m.resolution ?? '').toLowerCase() !== pref.preferredResolution.toLowerCase()) return false;
+  if (pref.preferredResolution && normRes(m.resolution) !== normRes(pref.preferredResolution)) return false;
   if (pref.preferredCodec && !(m.videoCodec ?? '').toLowerCase().includes(pref.preferredCodec.toLowerCase())) return false;
   return true;
 }

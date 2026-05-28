@@ -1,6 +1,8 @@
 import './globals.css';
 import { Outfit, Manrope, JetBrains_Mono } from 'next/font/google';
 import { Sidebar } from '@/components/Sidebar';
+import { NotificationProvider } from '@/lib/notifications';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const display = Outfit({ subsets: ['latin'], variable: '--font-display', display: 'swap', weight: ['500', '600', '700'] });
 const sans = Manrope({ subsets: ['latin'], variable: '--font-sans', display: 'swap', weight: ['400', '500', '600', '700'] });
@@ -23,10 +25,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-sans">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 min-w-0">{children}</main>
-        </div>
+        <NotificationProvider>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <main className="flex-1 min-w-0 relative">
+              <NotificationBell />
+              {children}
+            </main>
+          </div>
+        </NotificationProvider>
       </body>
     </html>
   );

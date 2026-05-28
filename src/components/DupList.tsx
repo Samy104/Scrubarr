@@ -4,6 +4,7 @@ import { StatsBar } from './StatsBar';
 import { DupCard } from './DupCard';
 import type { DupItem, ScanCache } from '@/lib/types';
 import { Search } from 'lucide-react';
+import { useNotifications } from '@/lib/notifications';
 
 interface Props {
   /** restrict to a section type */
@@ -18,6 +19,7 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'savings' | 'title' | 'versions' | 'size'>('savings');
   const [showOnlyRec, setShowOnlyRec] = useState(false);
+  const { notify } = useNotifications();
 
   const [pageSize, setPageSize] = useState(200);
 
@@ -60,12 +62,14 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
   }, [cache, query, sort, showOnlyRec, filterSection]);
 
   const handleDelete = async (rk: string, mediaId: string) => {
+    const item = cache?.items.find((x) => x.ratingKey === rk);
     const r = await fetch(`/api/dupes/${rk}/media/${mediaId}`, { method: 'DELETE' });
     const d = await r.json();
     if (!d.ok) {
-      alert(`Delete failed: ${d.msg ?? 'unknown error'}`);
+      notify({ kind: 'error', title: 'Delete failed', body: `${item?.title ?? rk}: ${d.msg ?? 'unknown error'}` });
       return;
     }
+    notify({ kind: 'success', title: 'Version deleted', body: item?.title ?? rk });
     await load();
   };
 
@@ -73,10 +77,18 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
     if (!cache) return;
     const item = cache.items.find((x) => x.ratingKey === rk);
     if (!item) return;
+    let ok = 0, fail = 0;
     for (const m of item.media) {
       if (m.id === keepMediaId) continue;
-      await fetch(`/api/dupes/${rk}/media/${m.id}`, { method: 'DELETE' });
+      const r = await fetch(`/api/dupes/${rk}/media/${m.id}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({ ok: false }));
+      if (d.ok) ok++; else fail++;
     }
+    notify({
+      kind: fail ? 'warn' : 'success',
+      title: `Kept one version of ${item.title}`,
+      body: `${ok} deleted${fail ? `, ${fail} failed` : ''}`,
+    });
     await load();
   };
 
@@ -86,6 +98,7 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ratingKey: rk, title, type }),
     });
+    notify({ kind: 'info', title: 'Added to ignore list', body: title });
     await load();
   };
 

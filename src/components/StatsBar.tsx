@@ -25,7 +25,7 @@ export function StatsBar({ items, scannedAt, scanning, durationSec, onRescan, to
   const itemCount = totals ? totals.count : items.length;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 bg-panel border-b border-border sticky top-0 z-10">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 pr-16 bg-panel border-b border-border sticky top-0 z-10">
       <Stat label="Items" value={itemCount.toString()} />
       <Stat label="Total dup size" value={humanSize(totalSize)} />
       <Stat label="Savings potential" value={humanSize(savings)} highlight />
