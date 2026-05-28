@@ -6,6 +6,37 @@ Scrubarr scans Plex for items that have multiple file versions (1080p plus 4K, m
 
 It is meant to replace selexin/cleanarr, which is unmaintained and tends to time out on large libraries.
 
+## Screenshots
+
+### Movies view
+![Movies](screenshots/01-movies.png)
+
+### A movie with three versions expanded
+Each version shows its size, resolution, codec, audio, parsed quality tags from the filename, and a "Keep only this" button that deletes every other version with one click.
+
+![Expanded](screenshots/02-movies-expanded.png)
+
+### TV and Anime episodes
+Episodes that have multiple files are listed individually with their show + season/episode prefix.
+
+![TV](screenshots/03-tv.png)
+![Anime](screenshots/04-anime.png)
+
+### Rules
+Create rules that highlight a "recommended" version. Rules never auto-delete; they annotate the list so you can act on it.
+
+![Rules](screenshots/05-rules.png)
+
+### Deletion log
+Every delete attempt is recorded with the file path, size, codec, resolution, and tags. Total freed bytes is computed across all successful deletions.
+
+![Deletion log](screenshots/06-log.png)
+
+### Status
+Plex health, scan timing, and item counts at a glance.
+
+![Status](screenshots/07-status.png)
+
 ## Features
 
 - **Movies, TV shows, and anime** in separate views, each with its own filtering and sorting.

@@ -1,4 +1,4 @@
-import { listSections, listDuplicateMovies, listDuplicateEpisodes } from './plex';
+import { listSections, listDuplicateMovies, listDuplicateEpisodesInSection } from './plex';
 import { prisma } from './db';
 import { humanSize } from './format';
 import { applyRulesAnnotation } from './rules';
@@ -101,29 +101,26 @@ export async function refreshDupes(): Promise<{ count: number; durationSec: numb
           all.push(toDupItem(it, media, sec, 'movie'));
         }
       } else {
-        // TV / Anime: get all shows with duplicates, then dig into episodes
-        const shows = await listDuplicateMovies(sec.key); // shows that *have* dup episodes
-        for (const show of shows) {
-          const showRk = String(show.ratingKey);
-          if (ignoredKeys.has(showRk)) continue;
-          const dupEps = await listDuplicateEpisodes(showRk);
-          for (const ep of dupEps) {
-            const rk = String(ep.ratingKey);
-            if (ignoredKeys.has(rk)) continue;
-            const media = buildMediaList(ep);
-            if (media.length < 2) continue;
-            const sxe = ep.parentIndex != null && ep.index != null
+        // TV / Anime: one call returns every duplicate episode in the library
+        const dupEps = await listDuplicateEpisodesInSection(sec.key);
+        for (const ep of dupEps) {
+          const rk = String(ep.ratingKey);
+          if (ignoredKeys.has(rk)) continue;
+          if (ignoredKeys.has(String(ep.grandparentRatingKey))) continue;
+          const media = buildMediaList(ep);
+          if (media.length < 2) continue;
+          const sxe =
+            ep.parentIndex != null && ep.index != null
               ? `S${String(ep.parentIndex).padStart(2, '0')}E${String(ep.index).padStart(2, '0')}`
               : '';
-            all.push(
-              toDupItem(ep, media, sec, 'episode', {
-                showTitle: ep.grandparentTitle ?? show.title,
-                seasonEpisode: sxe,
-                parentRatingKey: ep.parentRatingKey,
-                grandparentRatingKey: ep.grandparentRatingKey,
-              }),
-            );
-          }
+          all.push(
+            toDupItem(ep, media, sec, 'episode', {
+              showTitle: ep.grandparentTitle ?? '',
+              seasonEpisode: sxe,
+              parentRatingKey: ep.parentRatingKey,
+              grandparentRatingKey: ep.grandparentRatingKey,
+            }),
+          );
         }
       }
     }

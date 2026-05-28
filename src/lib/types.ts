@@ -91,4 +91,7 @@ export interface ScanCache {
   items: DupItem[];
   error: string | null;
   durationSec: number;
+  offset?: number;
+  limit?: number;
+  hasMore?: boolean;
 }

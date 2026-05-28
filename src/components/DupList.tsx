@@ -17,9 +17,14 @@ export function DupList({ filterSection, emptyTitle }: Props) {
   const [sort, setSort] = useState<'savings' | 'title' | 'versions' | 'size'>('savings');
   const [showOnlyRec, setShowOnlyRec] = useState(false);
 
+  const [pageSize, setPageSize] = useState(200);
+
   const load = async () => {
     try {
-      const r = await fetch('/api/dupes', { cache: 'no-store' });
+      const params = new URLSearchParams();
+      if (filterSection) params.set('library', filterSection);
+      params.set('limit', String(pageSize));
+      const r = await fetch(`/api/dupes?${params}`, { cache: 'no-store' });
       if (r.ok) setCache(await r.json());
     } catch {}
   };
@@ -28,14 +33,11 @@ export function DupList({ filterSection, emptyTitle }: Props) {
     load();
     const t = setInterval(load, 15_000);
     return () => clearInterval(t);
-  }, []);
+  }, [filterSection, pageSize]);
 
   const items = useMemo(() => {
     if (!cache) return [];
     let out = cache.items;
-    if (filterSection === 'movie') out = out.filter((x) => x.sectionType === 'movie');
-    else if (filterSection === 'show') out = out.filter((x) => x.sectionType === 'show' && !x.section.toLowerCase().includes('anime'));
-    else if (filterSection === 'anime') out = out.filter((x) => x.section.toLowerCase().includes('anime'));
     if (query) {
       const q = query.toLowerCase();
       out = out.filter(
@@ -129,7 +131,9 @@ export function DupList({ filterSection, emptyTitle }: Props) {
           />
           Only items with rule recommendation
         </label>
-        <div className="ml-auto text-xs text-text-dim">{items.length} shown</div>
+        <div className="ml-auto text-xs text-text-dim">
+          {items.length} shown of {cache?.count ?? 0}
+        </div>
       </div>
       <div className="p-4 max-w-6xl mx-auto">
         {cache?.error && (
@@ -150,6 +154,16 @@ export function DupList({ filterSection, emptyTitle }: Props) {
             onIgnore={() => handleIgnore(item.ratingKey, item.title, item.type)}
           />
         ))}
+        {(cache?.hasMore || (cache && pageSize < cache.count)) && (
+          <div className="text-center py-6">
+            <button
+              onClick={() => setPageSize((s) => s + 200)}
+              className="px-4 py-2 bg-panel-2 hover:bg-border border border-border rounded-md text-sm"
+            >
+              Load 200 more ({Math.max((cache?.count ?? 0) - items.length, 0)} remaining)
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

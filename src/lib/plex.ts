@@ -33,11 +33,10 @@ export async function listDuplicateMovies(sectionKey: string): Promise<any[]> {
   return j?.MediaContainer?.Metadata ?? [];
 }
 
-/** For a TV show with duplicate episodes, walk all episodes and return only ones with >1 Media. */
-export async function listDuplicateEpisodes(showRatingKey: string): Promise<any[]> {
-  const j = await plexFetch(`/library/metadata/${showRatingKey}/allLeaves`, {}, 180_000);
-  const all: any[] = j?.MediaContainer?.Metadata ?? [];
-  return all.filter((ep) => Array.isArray(ep.Media) && ep.Media.length > 1);
+/** Returns every duplicate episode in a TV/Anime library in one call (type=4 = episode). */
+export async function listDuplicateEpisodesInSection(sectionKey: string): Promise<any[]> {
+  const j = await plexFetch(`/library/sections/${sectionKey}/all`, { duplicate: '1', type: '4' }, 180_000);
+  return j?.MediaContainer?.Metadata ?? [];
 }
 
 export async function getItemMeta(ratingKey: string): Promise<any | null> {
