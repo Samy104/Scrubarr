@@ -1,0 +1,27 @@
+services:
+  scrubarr:
+    build: .
+    image: scrubarr:latest
+    container_name: scrubarr
+    restart: unless-stopped
+    networks:
+      - cloudbox
+    expose:
+      - "8080"
+    environment:
+      - DATABASE_URL=file:/db/scrubarr.db
+      - PLEX_BASE_URL=${PLEX_BASE_URL:-http://172.18.0.1:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - VIRTUAL_HOST=${VIRTUAL_HOST:-scrubarr.selfcollapse.com}
+      - VIRTUAL_PORT=8080
+      - LETSENCRYPT_HOST=${LETSENCRYPT_HOST:-scrubarr.selfcollapse.com}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+    env_file:
+      - ./config/.env
+    volumes:
+      - ./config:/db
+
+networks:
+  cloudbox:
+    external: true

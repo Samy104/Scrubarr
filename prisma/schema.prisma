@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model IgnoredItem {
+  id          Int      @id @default(autoincrement())
+  ratingKey   String   @unique
+  title       String?
+  type        String?  // movie | show | episode
+  ignoredAt   DateTime @default(now())
+  reason      String?
+}
+
+model DeletionLog {
+  id          Int      @id @default(autoincrement())
+  ratingKey   String
+  parentRatingKey String? // for episodes: the show's key
+  title       String?
+  showTitle   String?
+  seasonEpisode String? // e.g. "S01E03"
+  mediaId     String?
+  filePath    String?
+  sizeBytes   BigInt?
+  resolution  String?
+  videoCodec  String?
+  qualityTags String?  // JSON-stringified list
+  deletedAt   DateTime @default(now())
+  status      String   // success | failed
+  error       String?
+  triggeredBy String?  // user | rule | manual | bulk
+
+  @@index([ratingKey])
+  @@index([deletedAt])
+}
+
+model Rule {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  scope       String   // movie | show | anime | all
+  priority    Int      @default(100) // lower = applied first
+  enabled     Boolean  @default(true)
+
+  // Match criteria - all stored as JSON
+  matchJson   String   // {titleRegex?, yearMin?, yearMax?, genres?: string[], collections?: string[], studios?: string[], libraries?: string[]}
+  // Action - stored as JSON
+  actionJson  String   // {kind: "prefer_resolution" | "prefer_largest" | "prefer_codec" | "ignore" | "mark_review", value?: string}
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  appliedCount Int     @default(0)
+}
+
+model ScanState {
+  id              Int      @id @default(1)
+  lastScanAt      DateTime?
+  lastScanCount   Int      @default(0)
+  lastScanError   String?
+  lastScanDuration Int     @default(0) // seconds
+}

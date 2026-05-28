@@ -1,0 +1,64 @@
+import type { PlexSection } from './types';
+
+const PLEX = process.env.PLEX_BASE_URL ?? 'http://172.18.0.1:32400';
+const TOKEN = process.env.PLEX_TOKEN ?? '';
+
+async function plexFetch(path: string, params: Record<string, string> = {}, timeoutMs = 60_000): Promise<any> {
+  const url = new URL(path, PLEX);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url.toString(), {
+      signal: ac.signal,
+      headers: {
+        'X-Plex-Token': TOKEN,
+        Accept: 'application/json',
+      },
+    });
+    if (!r.ok) throw new Error(`Plex ${r.status}: ${path}`);
+    return r.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function listSections(): Promise<PlexSection[]> {
+  const j = await plexFetch('/library/sections');
+  return j?.MediaContainer?.Directory ?? [];
+}
+
+export async function listDuplicateMovies(sectionKey: string): Promise<any[]> {
+  const j = await plexFetch(`/library/sections/${sectionKey}/all`, { duplicate: '1' }, 180_000);
+  return j?.MediaContainer?.Metadata ?? [];
+}
+
+/** For a TV show with duplicate episodes, walk all episodes and return only ones with >1 Media. */
+export async function listDuplicateEpisodes(showRatingKey: string): Promise<any[]> {
+  const j = await plexFetch(`/library/metadata/${showRatingKey}/allLeaves`, {}, 180_000);
+  const all: any[] = j?.MediaContainer?.Metadata ?? [];
+  return all.filter((ep) => Array.isArray(ep.Media) && ep.Media.length > 1);
+}
+
+export async function getItemMeta(ratingKey: string): Promise<any | null> {
+  const j = await plexFetch(`/library/metadata/${ratingKey}`);
+  return j?.MediaContainer?.Metadata?.[0] ?? null;
+}
+
+export async function deleteMedia(ratingKey: string, mediaId: string): Promise<{ ok: boolean; msg: string }> {
+  const url = new URL(`/library/metadata/${ratingKey}/media/${mediaId}`, PLEX);
+  const r = await fetch(url.toString(), {
+    method: 'DELETE',
+    headers: { 'X-Plex-Token': TOKEN },
+  });
+  return { ok: r.status === 200 || r.status === 204, msg: `HTTP ${r.status}` };
+}
+
+export async function refreshItem(ratingKey: string): Promise<boolean> {
+  const url = new URL(`/library/metadata/${ratingKey}/refresh`, PLEX);
+  const r = await fetch(url.toString(), {
+    method: 'PUT',
+    headers: { 'X-Plex-Token': TOKEN },
+  });
+  return r.status === 200 || r.status === 204;
+}
