@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useRef, useState, useMemo } from 'react';
 import {
-  Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play, X,
+  Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play, X, Info,
 } from 'lucide-react';
 import { humanSize } from '@/lib/format';
 import type { ShowSummary, SeriesPreferenceDTO } from '@/lib/types';
 import { useNotifications } from '@/lib/notifications';
 import { MediaPoster } from '@/components/MediaPoster';
+import { InfoModal } from '@/components/InfoModal';
 
 const RESOLUTIONS = ['', '2160', '1080', '720', '480'];
 const CODECS = ['', 'hevc', 'h264', 'av1', 'mpeg4'];
@@ -282,6 +283,7 @@ function ShowCard({
   const [remux, setRemux] = useState(show.preference?.preferRemux ?? false);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -335,14 +337,30 @@ function ShowCard({
 
   return (
     <div className="bg-panel border border-border rounded-lg p-3.5 hover:border-text-dim/40 transition-colors">
+      {infoOpen && (
+        <InfoModal ratingKey={show.showRatingKey} open={infoOpen} onClose={() => setInfoOpen(false)} />
+      )}
       <div className="flex items-start gap-3">
-        <MediaPoster
-          ratingKey={show.showRatingKey}
-          title={show.showTitle}
-          kind="show"
-          width={44}
-          className="mt-0.5"
-        />
+        <div className="flex flex-col items-center gap-1.5">
+          <MediaPoster
+            ratingKey={show.showRatingKey}
+            title={show.showTitle}
+            kind="show"
+            width={44}
+            className="mt-0.5"
+          />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setInfoOpen(true);
+            }}
+            className="text-text-dim hover:text-accent p-1 -mt-0.5 rounded transition-colors"
+            aria-label="Show details"
+            title="Show details"
+          >
+            <Info size={13} />
+          </button>
+        </div>
         <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setOpen((o) => !o)}>
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="font-display font-semibold tracking-tight">{show.showTitle}</h2>

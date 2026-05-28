@@ -4,10 +4,11 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { humanSize } from '@/lib/format';
 import type { CleanupCandidate, CleanupRuleDTO } from '@/lib/types';
-import { RefreshCw, ShieldCheck, Trash2, Search, AlertTriangle, Sparkles, ExternalLink, EyeOff, Wand2, X } from 'lucide-react';
+import { RefreshCw, ShieldCheck, Trash2, Search, AlertTriangle, Sparkles, ExternalLink, EyeOff, Wand2, X, Info } from 'lucide-react';
 import { useNotifications } from '@/lib/notifications';
 import { useConfirm } from '@/lib/confirm';
 import { MediaPoster } from '@/components/MediaPoster';
+import { InfoModal } from '@/components/InfoModal';
 
 interface Props { scope: 'movie' | 'show' }
 
@@ -474,6 +475,7 @@ function CandidateRow({
   const lastViewed = c.lastViewedAt ? new Date(c.lastViewedAt * 1000) : null;
   const hasException = c.matchedRules.some((r) => r.kind === 'exception');
   const sizeStr = scope === 'movie' && c.totalSize ? humanSize(c.totalSize) : null;
+  const [infoOpen, setInfoOpen] = useState(false);
   return (
     <div
       className={`mv-fade-up bg-panel border rounded-lg p-3 flex items-center gap-3 transition-colors ${
@@ -569,6 +571,14 @@ function CandidateRow({
           <EyeOff size={14} />
         </button>
       )}
+      <button
+        onClick={() => setInfoOpen(true)}
+        className="text-text-dim hover:text-accent p-1.5"
+        aria-label="Show details"
+        title="Show details"
+      >
+        <Info size={14} />
+      </button>
       <a
         href={`https://app.plex.tv/desktop#!/server/_/details?key=${encodeURIComponent('/library/metadata/' + c.ratingKey)}`}
         target="_blank"
@@ -578,6 +588,9 @@ function CandidateRow({
       >
         <ExternalLink size={14} />
       </a>
+      {infoOpen && (
+        <InfoModal ratingKey={c.ratingKey} open={infoOpen} onClose={() => setInfoOpen(false)} />
+      )}
     </div>
   );
 }

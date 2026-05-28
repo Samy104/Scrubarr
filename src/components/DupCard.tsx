@@ -1,10 +1,11 @@
 'use client';
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, EyeOff, Trash2, Check, Sparkles, Wand2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, EyeOff, Trash2, Check, Sparkles, Wand2, Info } from 'lucide-react';
 import { humanSize } from '@/lib/format';
 import type { DupItem, MediaVersion } from '@/lib/types';
 import { useConfirm } from '@/lib/confirm';
 import { MediaPoster } from './MediaPoster';
+import { InfoModal } from './InfoModal';
 
 interface Props {
   item: DupItem;
@@ -16,8 +17,15 @@ interface Props {
 export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const maxSize = Math.max(...item.media.map((m) => m.size), 1);
   const confirm = useConfirm();
+
+  // For episode rows we want the modal to describe the parent show, not the
+  // episode -- the same reasoning as MediaPoster's grandparent-thumb fallback.
+  // Movies and shows just use their own ratingKey.
+  const infoRatingKey =
+    item.posterRatingKey ?? (item.type === 'episode' ? item.grandparentRatingKey : item.ratingKey) ?? item.ratingKey;
 
   const recommendedVersion = item.recommended?.keepMediaId
     ? item.media.find((m) => m.id === item.recommended!.keepMediaId)
@@ -71,6 +79,17 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
         <div className="text-warn text-xs font-mono font-semibold px-2.5 py-1 rounded-md whitespace-nowrap border border-warn/30 bg-warn/10">
           save {humanSize(item.savingsPotential)}
         </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setInfoOpen(true);
+          }}
+          className="text-text-dim hover:text-accent p-1.5 rounded-md transition-colors"
+          aria-label="Show details"
+          title="Show details"
+        >
+          <Info size={14} />
+        </button>
         {recommendedVersion && (
           <button
             onClick={async (e) => {
@@ -128,6 +147,10 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
           <EyeOff size={12} /> Ignore
         </button>
       </div>
+
+      {infoOpen && (
+        <InfoModal ratingKey={infoRatingKey} open={infoOpen} onClose={() => setInfoOpen(false)} />
+      )}
 
       {open && (
         <div className="mt-3 pt-3 border-t border-border space-y-2.5">

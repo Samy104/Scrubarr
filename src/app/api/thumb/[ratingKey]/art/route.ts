@@ -6,21 +6,15 @@ const TOKEN = process.env.PLEX_TOKEN ?? '';
 export const dynamic = 'force-dynamic';
 
 /**
- * Server-side image proxy for both poster thumbs and backdrop art. The browser
- * can't reach Plex directly (it lives on a docker network) and we don't want
- * the X-Plex-Token in page source either, so this thin route fetches the
- * image server-side and streams the bytes back.
+ * Backdrop / "art" image variant. Same proxy semantics as the thumb route:
+ * never expose the Plex token to the browser, surface 404s cleanly so the
+ * <img onError> can fall back to a flat hero color.
  *
- * Plex returns 404 when the item has no thumb/art -- surface that as 404 so
- * <img onError> can fall back to a placeholder. We deliberately do NOT log
- * tokens or full Plex URLs at INFO level.
- *
- * Variants:
- *   ?variant=thumb  (default) -- 2:3 poster from /library/metadata/{rk}/thumb
- *   ?variant=art             -- wide backdrop from /library/metadata/{rk}/art
+ * This is a sibling of /api/thumb/[ratingKey]?variant=art -- either form is
+ * supported. The /art subroute reads nicer at the call site.
  */
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: { ratingKey: string } },
 ) {
   const rk = params.ratingKey;
@@ -31,13 +25,7 @@ export async function GET(
     return new NextResponse('plex token not configured', { status: 503 });
   }
 
-  const variant = (req.nextUrl.searchParams.get('variant') ?? 'thumb').toLowerCase();
-  const segment = variant === 'art' ? 'art' : 'thumb';
-
-  // Plex accepts the canonical metadata URL keyed by ratingKey; the optional
-  // timestamp segment is only used for cache-busting on the Plex side and
-  // isn't required for the response.
-  const url = new URL(`/library/metadata/${rk}/${segment}`, PLEX);
+  const url = new URL(`/library/metadata/${rk}/art`, PLEX);
 
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 15_000);
