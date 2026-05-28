@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCache, refreshDupes } from '@/lib/scanner';
+import { applySeriesPreferences } from '@/lib/seriesPref';
+import { prisma } from '@/lib/db';
 import type { DupItem } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +10,11 @@ export const revalidate = 0;
 export async function GET(req: NextRequest) {
   const cache = getCache();
   if (!cache.scannedAt && !cache.scanning) refreshDupes().catch(() => {});
+
+  // Re-apply series preferences on every request so newly saved prefs take effect
+  // without waiting for a Plex rescan. Cheap: pure annotation pass over cached items.
+  const prefs = await prisma.seriesPreference.findMany();
+  applySeriesPreferences(cache.items, prefs);
 
   const { searchParams } = new URL(req.url);
   const library = searchParams.get('library'); // movie | show | anime | episodes
@@ -22,6 +29,12 @@ export async function GET(req: NextRequest) {
   else if (library === 'episodes') items = items.filter((x) => x.sectionType !== 'movie');
 
   const totalForFilter = items.length;
+  let totalSize = 0;
+  let savingsPotential = 0;
+  for (const it of items) {
+    totalSize += it.totalSize || 0;
+    savingsPotential += it.savingsPotential || 0;
+  }
   const sliced = items.slice(offset, offset + limit);
 
   return NextResponse.json({
@@ -34,5 +47,6 @@ export async function GET(req: NextRequest) {
     offset,
     limit,
     hasMore: offset + sliced.length < totalForFilter,
+    totals: { count: totalForFilter, totalSize, savingsPotential },
   });
 }

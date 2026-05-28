@@ -13,11 +13,25 @@ interface PrefRow {
   notes: string | null;
 }
 
+/**
+ * Hard filter: resolution and codec are required matches when set. REMUX is
+ * NOT a hard filter — it is a soft tiebreaker applied during ranking, so a
+ * series with "prefer REMUX" still auto-cleans episodes that only have a
+ * non-REMUX version at the preferred resolution.
+ */
 function matchesPreference(m: MediaVersion, pref: PrefRow): boolean {
   if (pref.preferredResolution && (m.resolution ?? '').toLowerCase() !== pref.preferredResolution.toLowerCase()) return false;
   if (pref.preferredCodec && !(m.videoCodec ?? '').toLowerCase().includes(pref.preferredCodec.toLowerCase())) return false;
-  if (pref.preferRemux && !m.quality.includes('REMUX')) return false;
   return true;
+}
+
+function rankMatch(m: MediaVersion, pref: PrefRow): number {
+  // Higher rank wins. REMUX wins over non-REMUX when preferRemux is on; size is
+  // the final tiebreaker so the largest variant wins within a tier.
+  let rank = 0;
+  if (pref.preferRemux && m.quality.includes('REMUX')) rank += 1_000_000_000_000;
+  rank += m.size ?? 0;
+  return rank;
 }
 
 /** Annotates every TV/Anime episode item with seriesPref status based on its show's preference. */
@@ -32,18 +46,19 @@ export function applySeriesPreferences(items: DupItem[], prefs: PrefRow[]): void
     const showKey = String(it.grandparentRatingKey ?? '');
     const pref = byShow.get(showKey);
     if (!pref) continue;
-    // Find a version that matches the preference
+    // Find every version that satisfies the hard filters (resolution, codec)
     const matches = it.media.filter((m) => matchesPreference(m, pref));
     if (matches.length > 0) {
-      // Among matches, prefer the largest (covers tie-breakers between REMUX vs WEB-DL for same res)
-      const keep = matches[0]; // media already sorted desc by size
+      // Rank candidates: REMUX wins when preferred, size is the final tiebreaker
+      const keep = [...matches].sort((a, b) => rankMatch(b, pref) - rankMatch(a, pref))[0];
+      const remuxNote = pref.preferRemux && keep.quality.includes('REMUX') ? ' REMUX' : '';
       it.seriesPref = {
         status: 'autoClean',
         keepMediaId: keep.id,
-        reason: `Keep ${keep.resolution} ${keep.videoCodec}${pref.preferRemux ? ' REMUX' : ''} per series preference`,
+        reason: `Keep ${keep.resolution} ${keep.videoCodec}${remuxNote} per series preference`,
       };
     } else {
-      const target = [pref.preferredResolution, pref.preferredCodec, pref.preferRemux ? 'REMUX' : null]
+      const target = [pref.preferredResolution, pref.preferredCodec, pref.preferRemux ? 'prefer REMUX' : null]
         .filter(Boolean)
         .join(' ');
       it.seriesPref = {

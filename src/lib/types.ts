@@ -94,6 +94,8 @@ export interface ScanCache {
   offset?: number;
   limit?: number;
   hasMore?: boolean;
+  /** Aggregate totals over the full filtered set (before pagination). */
+  totals?: { count: number; totalSize: number; savingsPotential: number };
 }
 
 export interface SeriesPreferenceDTO {

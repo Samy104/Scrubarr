@@ -10,16 +10,23 @@ interface Props {
   scanning: boolean;
   durationSec: number;
   onRescan: () => Promise<void>;
+  /** Aggregate totals for the full filtered set; if absent, falls back to summing visible items. */
+  totals?: { count: number; totalSize: number; savingsPotential: number };
 }
 
-export function StatsBar({ items, scannedAt, scanning, durationSec, onRescan }: Props) {
+export function StatsBar({ items, scannedAt, scanning, durationSec, onRescan, totals }: Props) {
   const [rescanLoading, setRescanLoading] = useState(false);
-  const totalSize = items.reduce((a, x) => a + (x.totalSize || 0), 0);
-  const savings = items.reduce((a, x) => a + (x.savingsPotential || 0), 0);
+  const totalSize = totals
+    ? totals.totalSize
+    : items.reduce((a, x) => a + (x.totalSize || 0), 0);
+  const savings = totals
+    ? totals.savingsPotential
+    : items.reduce((a, x) => a + (x.savingsPotential || 0), 0);
+  const itemCount = totals ? totals.count : items.length;
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 bg-panel border-b border-border sticky top-0 z-10">
-      <Stat label="Items" value={items.length.toString()} />
+      <Stat label="Items" value={itemCount.toString()} />
       <Stat label="Total dup size" value={humanSize(totalSize)} />
       <Stat label="Savings potential" value={humanSize(savings)} highlight />
       <Stat

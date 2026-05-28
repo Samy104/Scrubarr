@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCache } from '@/lib/scanner';
-import { buildShowSummaries } from '@/lib/seriesPref';
+import { applySeriesPreferences, buildShowSummaries } from '@/lib/seriesPref';
 import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -9,6 +9,7 @@ export const revalidate = 0;
 export async function GET(req: NextRequest) {
   const cache = getCache();
   const prefs = await prisma.seriesPreference.findMany();
+  applySeriesPreferences(cache.items, prefs);
   const summaries = buildShowSummaries(cache.items, prefs);
 
   const { searchParams } = new URL(req.url);

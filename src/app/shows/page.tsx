@@ -77,8 +77,9 @@ export default function ShowsPage() {
         notes: draft.notes ?? null,
       }),
     });
-    await fetch('/api/rescan', { method: 'POST' });
-    setTimeout(load, 1500);
+    // Preferences are re-applied to cached items on every /api/shows GET, so no
+    // Plex rescan is needed for the autoClean count to update.
+    await load();
   };
 
   const handleDelete = async (showRatingKey: string) => {
@@ -86,8 +87,7 @@ export default function ShowsPage() {
     await fetch(`/api/series-preference?showRatingKey=${encodeURIComponent(showRatingKey)}`, {
       method: 'DELETE',
     });
-    await fetch('/api/rescan', { method: 'POST' });
-    setTimeout(load, 1500);
+    await load();
   };
 
   const handleAutoClean = async (s: ShowSummary) => {
@@ -338,14 +338,17 @@ function ShowCard({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-text-dim self-end mb-1.5">
+            <label
+              className="flex items-center gap-2 text-sm text-text-dim self-end mb-1.5"
+              title="Soft tiebreaker: pick REMUX when available, otherwise fall back to the best non-REMUX version at the preferred resolution"
+            >
               <input
                 type="checkbox"
                 checked={remux}
                 onChange={(e) => setRemux(e.target.checked)}
                 className="accent-accent"
               />
-              Require REMUX
+              Prefer REMUX
             </label>
           </div>
           <div className="flex items-center gap-2">

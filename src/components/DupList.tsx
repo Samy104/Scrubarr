@@ -102,6 +102,7 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
         scanning={cache?.scanning ?? false}
         durationSec={cache?.durationSec ?? 0}
         onRescan={handleRescan}
+        totals={cache?.totals}
       />
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-border bg-panel/50">
         <div className="relative flex-1 min-w-[200px] max-w-md">
