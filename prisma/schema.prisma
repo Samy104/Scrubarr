@@ -64,3 +64,21 @@ model ScanState {
   lastScanError   String?
   lastScanDuration Int     @default(0) // seconds
 }
+
+/// Per-series preference for the TV / Anime libraries.
+/// When set, the scanner marks every duplicate episode of that show as either
+/// autoClean (the preferred version exists and the others can be deleted) or
+/// needsReview (no version matches the preference - fall back to manual review).
+model SeriesPreference {
+  id                  Int      @id @default(autoincrement())
+  showRatingKey       String   @unique
+  showTitle           String
+  sectionTitle        String?  // "TV Shows" / "Anime"
+  preferredResolution String?  // 2160p | 1080p | 720p | 480p
+  preferredCodec      String?  // x265 / x264 / etc. substring match on videoCodec
+  preferRemux         Boolean  @default(false) // also require REMUX in quality tags
+  enabled             Boolean  @default(true)
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}

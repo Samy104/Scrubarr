@@ -2,6 +2,7 @@ import { listSections, listDuplicateMovies, listDuplicateEpisodesInSection } fro
 import { prisma } from './db';
 import { humanSize } from './format';
 import { applyRulesAnnotation } from './rules';
+import { applySeriesPreferences } from './seriesPref';
 import type { DupItem, MediaVersion, ScanCache, MediaType } from './types';
 
 const QUALITY_RE = new RegExp(
@@ -128,6 +129,10 @@ export async function refreshDupes(): Promise<{ count: number; durationSec: numb
     // Apply rule annotations (does NOT delete - just marks recommended action per item)
     const rules = await prisma.rule.findMany({ where: { enabled: true }, orderBy: { priority: 'asc' } });
     applyRulesAnnotation(all, rules);
+
+    // Apply per-series preferences (TV/Anime only)
+    const prefs = await prisma.seriesPreference.findMany();
+    applySeriesPreferences(all, prefs);
 
     all.sort((a, b) => b.savingsPotential - a.savingsPotential);
     STATE.items = all;

@@ -4,6 +4,10 @@ declare module './types' {
   interface DupItem {
     /** rule-recommended action; UI uses this to highlight a "keep this" version */
     recommended?: { action: string; keepMediaId?: string; ruleName: string };
+    /** Per-series preference outcome for TV/Anime episodes only.
+     * autoClean: preferred version present and others can be deleted.
+     * needsReview: preference set but no version matches, manual review required. */
+    seriesPref?: { status: 'autoClean' | 'needsReview'; keepMediaId?: string; reason: string };
   }
 }
 

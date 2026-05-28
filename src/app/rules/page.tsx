@@ -55,7 +55,7 @@ export default function RulesPage() {
         </div>
         <button
           onClick={() => setEditing({ ...EMPTY })}
-          className="px-3 py-1.5 bg-accent text-bg font-semibold rounded-md flex items-center gap-2 text-sm"
+          className="px-3 py-1.5 bg-accent text-accent-ink font-semibold rounded-md flex items-center gap-2 text-sm"
         >
           <Plus size={14} /> New rule
         </button>
@@ -227,7 +227,7 @@ function RuleEditor({
           <button onClick={onCancel} className="px-3 py-1.5 border border-border rounded text-sm flex items-center gap-1.5">
             <X size={14} /> Cancel
           </button>
-          <button onClick={() => onSave(r)} className="px-3 py-1.5 bg-accent text-bg font-semibold rounded text-sm flex items-center gap-1.5">
+          <button onClick={() => onSave(r)} className="px-3 py-1.5 bg-accent text-accent-ink font-semibold rounded text-sm flex items-center gap-1.5">
             <Save size={14} /> {r.id ? 'Update' : 'Create'}
           </button>
         </div>

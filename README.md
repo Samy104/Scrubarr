@@ -8,34 +8,45 @@ It is meant to replace selexin/cleanarr, which is unmaintained and tends to time
 
 ## Screenshots
 
-### Movies view
+### Movies
 ![Movies](screenshots/01-movies.png)
 
-### A movie with three versions expanded
+### A movie expanded
 Each version shows its size, resolution, codec, audio, parsed quality tags from the filename, and a "Keep only this" button that deletes every other version with one click.
 
 ![Expanded](screenshots/02-movies-expanded.png)
 
-### TV and Anime episodes
-Episodes that have multiple files are listed individually with their show + season/episode prefix.
+### TV and Anime
+Duplicate episodes are listed individually with their show plus season and episode prefix.
 
 ![TV](screenshots/03-tv.png)
 ![Anime](screenshots/04-anime.png)
 
+### Shows (per-series preferences)
+Set a preferred version per series (e.g. Westworld = 1080p REMUX). Episodes that have the preferred version are marked auto-clean and you can run a bulk delete with the button on the right. Episodes that lack the preferred version stay in the normal TV / Anime list for manual review.
+
+![Shows](screenshots/08-shows.png)
+
 ### Rules
-Create rules that highlight a "recommended" version. Rules never auto-delete; they annotate the list so you can act on it.
+Create rules that highlight a recommended version. Rules never auto-delete, they annotate the list so you can act on it.
 
 ![Rules](screenshots/05-rules.png)
 
 ### Deletion log
-Every delete attempt is recorded with the file path, size, codec, resolution, and tags. Total freed bytes is computed across all successful deletions.
+Every delete attempt is recorded with file path, size, codec, resolution, tags, and outcome. Total freed bytes is computed across all successful deletions.
 
 ![Deletion log](screenshots/06-log.png)
 
 ### Status
-Plex health, scan timing, and item counts at a glance.
+Plex health, scan timing, item counts at a glance.
 
 ![Status](screenshots/07-status.png)
+
+### Light theme
+Toggle in the sidebar. Background is a warm light grey rather than solid white so cards have hierarchy. All accents recompute for legibility, including a more saturated blue for buttons and a deeper warm tone for savings badges.
+
+![Light mode movies](screenshots/09-light-movies.png)
+![Light mode shows](screenshots/10-light-shows.png)
 
 ## Features
 

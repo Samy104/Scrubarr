@@ -1,24 +1,28 @@
 import type { Config } from 'tailwindcss';
 
+const css = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
+
 const config: Config = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: {
     extend: {
       colors: {
-        bg:       '#0b0d10',
-        panel:    '#14181f',
-        'panel-2':'#1c222b',
-        border:   'rgb(42 49 59 / 1)',
-        text:     '#e8ecf1',
-        'text-dim': '#8b96a4',
-        accent:   '#7eb6ff',
-        good:     '#5dd39e',
-        warn:     '#ffc57e',
-        danger:   '#ff7575',
+        bg:         css('bg'),
+        panel:      css('panel'),
+        'panel-2':  css('panel-2'),
+        border:     css('border'),
+        text:       css('text'),
+        'text-dim': css('text-dim'),
+        accent:     css('accent'),
+        'accent-ink': css('accent-ink'),
+        good:       css('good'),
+        warn:       css('warn'),
+        danger:     css('danger'),
       },
       fontFamily: {
-        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],
-        mono: ['ui-monospace', '"SF Mono"', '"Cascadia Mono"', 'monospace'],
+        sans:    ['var(--font-sans)',    'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'var(--font-sans)', 'system-ui', 'sans-serif'],
+        mono:    ['var(--font-mono)',    'ui-monospace', 'monospace'],
       },
     },
   },

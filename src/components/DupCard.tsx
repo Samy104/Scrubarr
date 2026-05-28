@@ -17,7 +17,7 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
   const maxSize = Math.max(...item.media.map((m) => m.size), 1);
 
   return (
-    <div className="bg-panel border border-border rounded-lg p-4 mb-2.5">
+    <div className="bg-panel border border-border rounded-lg p-4 mb-2.5 hover:border-text-dim/40 transition-colors">
       <div className="flex items-center gap-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
         {open ? <ChevronDown size={18} className="text-text-dim" /> : <ChevronRight size={18} className="text-text-dim" />}
         <div className="flex-1 min-w-0">
@@ -38,12 +38,24 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
                 rule: {item.recommended.ruleName}
               </span>
             )}
+            {item.seriesPref?.status === 'autoClean' && (
+              <span className="inline-flex items-center gap-1 text-xs bg-good/15 text-good px-2 py-0.5 rounded-md">
+                <Sparkles size={11} />
+                auto-clean
+              </span>
+            )}
+            {item.seriesPref?.status === 'needsReview' && (
+              <span className="inline-flex items-center gap-1 text-xs bg-warn/15 text-warn px-2 py-0.5 rounded-md">
+                <Sparkles size={11} />
+                review (no match)
+              </span>
+            )}
           </div>
           <div className="text-xs text-text-dim mt-1">
             {item.section} · {item.versionCount} versions · total {humanSize(item.totalSize)}
           </div>
         </div>
-        <div className="bg-gradient-to-br from-warn to-orange-500 text-black text-xs font-semibold px-2.5 py-1 rounded-md whitespace-nowrap">
+        <div className="text-warn text-xs font-mono font-semibold px-2.5 py-1 rounded-md whitespace-nowrap border border-warn/30 bg-warn/10">
           save {humanSize(item.savingsPotential)}
         </div>
         <button
@@ -68,7 +80,9 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
               key={m.id}
               m={m}
               maxSize={maxSize}
-              recommended={item.recommended?.keepMediaId === m.id}
+              recommended={
+                item.recommended?.keepMediaId === m.id || item.seriesPref?.keepMediaId === m.id
+              }
               disabled={busy !== null}
               onDelete={async () => {
                 if (!confirm(`Delete this ${m.resolution} version from Plex + disk? File: ${m.file.split('/').pop()}`)) return;
@@ -151,7 +165,7 @@ function VersionRow({
         <button
           onClick={onKeep}
           disabled={disabled}
-          className="text-xs px-2.5 py-1.5 bg-accent text-bg hover:opacity-90 font-semibold rounded-md flex items-center gap-1 disabled:opacity-50 whitespace-nowrap"
+          className="text-xs px-2.5 py-1.5 bg-accent text-accent-ink hover:opacity-90 font-semibold rounded-md flex items-center gap-1 disabled:opacity-50 whitespace-nowrap"
         >
           <Check size={12} /> {loadingKey === `keep-${m.id}` ? 'working…' : 'Keep only this'}
         </button>

@@ -95,3 +95,31 @@ export interface ScanCache {
   limit?: number;
   hasMore?: boolean;
 }
+
+export interface SeriesPreferenceDTO {
+  id: number;
+  showRatingKey: string;
+  showTitle: string;
+  sectionTitle: string | null;
+  preferredResolution: string | null;
+  preferredCodec: string | null;
+  preferRemux: boolean;
+  enabled: boolean;
+  notes: string | null;
+}
+
+export interface ShowSummary {
+  showRatingKey: string;
+  showTitle: string;
+  sectionTitle: string;
+  sectionType: 'show';
+  episodeCount: number;
+  totalSize: number;
+  totalSizeHuman: string;
+  savingsPotential: number;
+  savingsHuman: string;
+  resolutionMix: Record<string, number>; // e.g. { "1080": 12, "2160": 3 }
+  preference: SeriesPreferenceDTO | null;
+  autoCleanCount: number;
+  needsReviewCount: number;
+}
