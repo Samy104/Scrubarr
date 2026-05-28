@@ -1,9 +1,9 @@
 import './globals.css';
-import { Funnel_Display, Geist, JetBrains_Mono } from 'next/font/google';
+import { Bricolage_Grotesque, Public_Sans, JetBrains_Mono } from 'next/font/google';
 import { Sidebar } from '@/components/Sidebar';
 
-const display = Funnel_Display({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
-const sans = Geist({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
+const display = Bricolage_Grotesque({ subsets: ['latin'], variable: '--font-display', display: 'swap', weight: ['500', '600', '700'] });
+const sans = Public_Sans({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
 export const metadata = {
