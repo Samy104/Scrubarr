@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCache, refreshDupes } from '@/lib/scanner';
 import { applySeriesPreferences } from '@/lib/seriesPref';
+import { applyRulesAnnotation } from '@/lib/rules';
 import { prisma } from '@/lib/db';
 import type { DupItem } from '@/lib/types';
 
@@ -11,13 +12,19 @@ export async function GET(req: NextRequest) {
   const cache = getCache();
   if (!cache.scannedAt && !cache.scanning) refreshDupes().catch(() => {});
 
-  // Re-apply series preferences on every request so newly saved prefs take effect
-  // without waiting for a Plex rescan. Cheap: pure annotation pass over cached items.
-  const prefs = await prisma.seriesPreference.findMany();
+  // Re-apply rule annotations + series preferences on every request so newly
+  // edited rules / saved prefs take effect without waiting for a Plex rescan.
+  // Both are pure annotation passes over cached items.
+  const [rules, prefs] = await Promise.all([
+    prisma.rule.findMany({ where: { enabled: true }, orderBy: { priority: 'asc' } }),
+    prisma.seriesPreference.findMany(),
+  ]);
+  applyRulesAnnotation(cache.items, rules);
   applySeriesPreferences(cache.items, prefs);
 
   const { searchParams } = new URL(req.url);
   const library = searchParams.get('library'); // movie | show | anime | episodes
+  const ruleId = Number(searchParams.get('rule'));
   const offset = Number(searchParams.get('offset') ?? 0);
   const limit = Math.min(Number(searchParams.get('limit') ?? 200), 1000);
 
@@ -27,6 +34,10 @@ export async function GET(req: NextRequest) {
     items = items.filter((x) => x.sectionType === 'show' && !x.section.toLowerCase().includes('anime'));
   else if (library === 'anime') items = items.filter((x) => x.section.toLowerCase().includes('anime'));
   else if (library === 'episodes') items = items.filter((x) => x.sectionType !== 'movie');
+
+  if (Number.isFinite(ruleId) && ruleId > 0) {
+    items = items.filter((x) => x.recommended?.ruleId === ruleId);
+  }
 
   const totalForFilter = items.length;
   let totalSize = 0;

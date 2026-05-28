@@ -1,5 +1,4 @@
-import { DupList } from '@/components/DupList';
-
-export default function MoviesPage() {
-  return <DupList filterSection="movie" emptyTitle="No movie duplicates 🎉" />;
+import { redirect } from 'next/navigation';
+export default function RootRedirect() {
+  redirect('/dedupe/movies');
 }

@@ -16,10 +16,11 @@ type Item =
 
 const items: Item[] = [
   { section: true, label: 'Dedupe', key: 'sec-dedupe' },
-  { href: '/',         label: 'Movies',     icon: Film },
-  { href: '/episodes', label: 'By episode', icon: ListVideo, alsoActiveOn: ['/tv', '/anime'] },
-  { href: '/shows',    label: 'By series',  icon: ListTree },
-  { href: '/rules',    label: 'Rules',      icon: FileCog },
+  { href: '/dedupe/movies',   label: 'Movies',     icon: Film, alsoActiveOn: ['/'] },
+  { href: '/dedupe/episodes', label: 'By episode', icon: ListVideo, alsoActiveOn: ['/tv', '/anime', '/episodes'] },
+  { href: '/dedupe/shows',    label: 'By series',  icon: ListTree, alsoActiveOn: ['/shows'] },
+  { href: '/dedupe/rules',    label: 'Rules',      icon: FileCog, alsoActiveOn: ['/rules'] },
+  { href: '/dedupe/ignored',  label: 'Ignored',    icon: EyeOff, alsoActiveOn: ['/ignored'] },
 
   { section: true, label: 'Cleanup', key: 'sec-cleanup' },
   { href: '/cleanup/movies',  label: 'Movies',  icon: Wand2 },
@@ -28,7 +29,6 @@ const items: Item[] = [
   { href: '/cleanup/ignored', label: 'Ignored', icon: EyeOff },
 
   { section: true, label: 'Library', key: 'sec-library' },
-  { href: '/ignored',  label: 'Ignored',    icon: EyeOff },
   { href: '/log',      label: 'Delete log', icon: Trash2 },
 
   { section: true, label: 'System', key: 'sec-system' },

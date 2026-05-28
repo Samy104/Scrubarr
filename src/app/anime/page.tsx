@@ -1,4 +1,4 @@
 import { redirect } from 'next/navigation';
 export default function AnimeRedirect() {
-  redirect('/episodes');
+  redirect('/dedupe/episodes');
 }

@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Save, Trash2, ShieldCheck, Sparkles, Power, ChevronDown, ChevronRight, Pencil, X } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, Save, Trash2, ShieldCheck, Sparkles, Power, ChevronDown, ChevronRight, Pencil, X, Wand2 } from 'lucide-react';
 import type { CleanupRuleDTO, CleanupRuleMatch, CleanupRuleConditions } from '@/lib/types';
 import { useNotifications } from '@/lib/notifications';
+import { useConfirm } from '@/lib/confirm';
 
 type Draft = Omit<CleanupRuleDTO, 'id'> & { id?: number };
 
@@ -23,6 +25,7 @@ export default function CleanupRulesPage() {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const { notify } = useNotifications();
+  const confirm = useConfirm();
 
   const load = async () => {
     const r = await fetch('/api/cleanup/rules', { cache: 'no-store' });
@@ -58,7 +61,13 @@ export default function CleanupRulesPage() {
   };
 
   const remove = async (rule: CleanupRuleDTO) => {
-    if (!confirm(`Delete rule "${rule.name}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete cleanup rule',
+      body: <>Remove the rule <span className="font-medium text-text">{rule.name}</span>. Future evaluations will skip it.</>,
+      danger: true,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
     await fetch(`/api/cleanup/rules?id=${rule.id}`, { method: 'DELETE' });
     notify({ kind: 'info', title: 'Rule deleted', body: rule.name });
     await load();
@@ -176,6 +185,13 @@ function RuleCard({
             </div>
           )}
         </div>
+        <Link
+          href={`/cleanup/${rule.scope === 'show' ? 'shows' : 'movies'}?rule=${rule.id}`}
+          className="px-2.5 py-1.5 text-xs rounded border border-border hover:border-accent hover:bg-accent/10 hover:text-accent inline-flex items-center gap-1.5"
+          title="Open the filtered candidate list for this rule"
+        >
+          <Wand2 size={12} /> View matches
+        </Link>
         <button onClick={onToggle} className={`p-1.5 rounded hover:bg-panel-2 ${rule.enabled ? 'text-good' : 'text-text-dim'}`} title={rule.enabled ? 'Disable' : 'Enable'}>
           <Power size={14} />
         </button>

@@ -1,9 +1,12 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { humanSize } from '@/lib/format';
-import type { CleanupCandidate } from '@/lib/types';
-import { RefreshCw, ShieldCheck, Trash2, X, Search, Play, AlertTriangle, Sparkles, ExternalLink, EyeOff } from 'lucide-react';
+import type { CleanupCandidate, CleanupRuleDTO } from '@/lib/types';
+import { RefreshCw, ShieldCheck, Trash2, Search, AlertTriangle, Sparkles, ExternalLink, EyeOff, Wand2, X } from 'lucide-react';
 import { useNotifications } from '@/lib/notifications';
+import { useConfirm } from '@/lib/confirm';
 
 interface Props { scope: 'movie' | 'show' }
 
@@ -26,10 +29,22 @@ export function CleanupList({ scope }: Props) {
   const [sort, setSort] = useState<'size' | 'title' | 'year' | 'rating' | 'lastView'>('size');
   const [showLib, setShowLib] = useState<'candidates' | 'all'>('candidates');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<BulkProgress | null>(null);
   const { notify } = useNotifications();
-  const bulkRef = useRef<HTMLDivElement>(null);
+  const confirm = useConfirm();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const ruleIdRaw = Number(searchParams?.get('rule') ?? '');
+  const activeRuleId = Number.isFinite(ruleIdRaw) && ruleIdRaw > 0 ? ruleIdRaw : null;
+  const [rule, setRule] = useState<CleanupRuleDTO | null>(null);
+
+  useEffect(() => {
+    if (!activeRuleId) { setRule(null); return; }
+    fetch(`/api/cleanup/rules?scope=${scope}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((all: CleanupRuleDTO[]) => setRule(all.find((x) => x.id === activeRuleId) ?? null))
+      .catch(() => setRule(null));
+  }, [activeRuleId, scope]);
 
   const load = async (force = false) => {
     const url = `/api/cleanup/candidates?scope=${scope}${force ? '&refresh=1' : ''}`;
@@ -43,23 +58,12 @@ export function CleanupList({ scope }: Props) {
     return () => clearInterval(t);
   }, [scope]);
 
-  useEffect(() => {
-    if (!confirmOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (bulkRef.current && !bulkRef.current.contains(e.target as Node)) setConfirmOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setConfirmOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onEsc);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [confirmOpen]);
-
   const visible = useMemo(() => {
     if (!data) return [];
     let list = showLib === 'candidates' ? data.candidates.filter((x) => x.isCandidate) : data.candidates;
+    if (activeRuleId) {
+      list = list.filter((x) => x.matchedRules.some((r) => r.id === activeRuleId));
+    }
     if (query) {
       const q = query.toLowerCase();
       list = list.filter((x) => x.title.toLowerCase().includes(q));
@@ -72,7 +76,7 @@ export function CleanupList({ scope }: Props) {
       lastView: (a, b) => (a.lastViewedAt ?? 0) - (b.lastViewedAt ?? 0),
     };
     return [...list].sort(sorts[sort]);
-  }, [data, query, sort, showLib]);
+  }, [data, query, sort, showLib, activeRuleId]);
 
   const visibleCandidates = useMemo(() => visible.filter((x) => x.isCandidate), [visible]);
   const selectedSize = useMemo(() => {
@@ -122,9 +126,7 @@ export function CleanupList({ scope }: Props) {
     await load();
   };
 
-  const runBulkDelete = async () => {
-    setConfirmOpen(false);
-    const list = data?.candidates.filter((x) => selected.has(x.ratingKey)) ?? [];
+  const runBulkDeleteList = async (list: typeof visible, triggeredBy: string) => {
     if (list.length === 0) return;
     setBulkProgress({ done: 0, total: list.length, ok: 0, failed: 0 });
     let ok = 0, failed = 0;
@@ -134,7 +136,7 @@ export function CleanupList({ scope }: Props) {
         const r = await fetch('/api/cleanup/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ratingKey: item.ratingKey, scope, triggeredBy: 'cleanup-bulk' }),
+          body: JSON.stringify({ ratingKey: item.ratingKey, scope, triggeredBy }),
         });
         const d = await r.json();
         if (d.ok) ok++; else failed++;
@@ -152,6 +154,71 @@ export function CleanupList({ scope }: Props) {
     setTimeout(() => setBulkProgress(null), 1800);
     await load();
   };
+
+  const runBulkDelete = async (e?: React.MouseEvent) => {
+    const list = data?.candidates.filter((x) => selected.has(x.ratingKey)) ?? [];
+    if (list.length === 0) return;
+    const totalBytes = list.reduce((a, x) => a + (x.totalSize || 0), 0);
+    if (!e?.shiftKey) {
+      const ok = await confirm({
+        title: `Delete ${list.length} ${scope}${list.length === 1 ? '' : 's'}`,
+        body: (
+          <>
+            Remove <span className="font-mono">{list.length}</span> {scope}
+            {list.length === 1 ? '' : 's'} (<span className="font-mono">{humanSize(totalBytes)}</span>) from Plex and disk.
+          </>
+        ),
+        danger: true,
+        confirmLabel: `Delete ${list.length}`,
+        hint: <>Hold <Kbd>Shift</Kbd> while clicking next time to skip this prompt.</>,
+      });
+      if (!ok) return;
+    }
+    await runBulkDeleteList(list, 'cleanup-bulk');
+  };
+
+  const processRule = async (e: React.MouseEvent) => {
+    if (!rule) return;
+    const list = (data?.candidates ?? []).filter((x) => x.isCandidate && x.matchedRules.some((r) => r.id === rule.id));
+    if (list.length === 0) {
+      notify({ kind: 'info', title: 'Nothing to process', body: `No active candidates match rule ${rule.name}.` });
+      return;
+    }
+    const totalBytes = list.reduce((a, x) => a + (x.totalSize || 0), 0);
+    if (rule.kind === 'exception') {
+      notify({ kind: 'info', title: 'Exception rule', body: 'Nothing to do — exception rules only protect items, they do not delete.' });
+      return;
+    }
+    if (!e.shiftKey) {
+      const ok = await confirm({
+        title: `Process rule: ${rule.name}`,
+        body: (
+          <>
+            Delete every active candidate matched by this eligibility rule —{' '}
+            <span className="font-mono">{list.length}</span> {scope}
+            {list.length === 1 ? '' : 's'} (<span className="font-mono">{humanSize(totalBytes)}</span>) from Plex and disk.
+          </>
+        ),
+        danger: true,
+        confirmLabel: `Delete ${list.length}`,
+        hint: <>Hold <Kbd>Shift</Kbd> while clicking next time to skip this prompt.</>,
+      });
+      if (!ok) return;
+    }
+    await runBulkDeleteList(list, `cleanup-rule:${rule.id}`);
+  };
+
+  const clearRuleFilter = () => {
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.delete('rule');
+    const qs = params.toString();
+    router.push(qs ? `?${qs}` : (typeof window !== 'undefined' ? window.location.pathname : ''));
+  };
+
+  const ruleMatchCount = useMemo(() => {
+    if (!data || !activeRuleId) return 0;
+    return data.candidates.reduce((a, x) => a + (x.matchedRules.some((r) => r.id === activeRuleId) ? 1 : 0), 0);
+  }, [data, activeRuleId]);
 
   return (
     <div>
@@ -174,6 +241,18 @@ export function CleanupList({ scope }: Props) {
           </button>
         </div>
       </div>
+
+      {activeRuleId && (
+        <CleanupRuleBanner
+          rule={rule}
+          ruleId={activeRuleId}
+          itemCount={ruleMatchCount}
+          progress={bulkProgress}
+          onProcess={processRule}
+          onClear={clearRuleFilter}
+          backHref="/cleanup/rules"
+        />
+      )}
 
       <div className="px-4 py-3 border-b border-border bg-panel/60 flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-md">
@@ -217,46 +296,17 @@ export function CleanupList({ scope }: Props) {
               >
                 Clear selection
               </button>
-              <div className="relative" ref={bulkRef}>
-                <button
-                  onClick={(e) => { if (e.shiftKey) void runBulkDelete(); else setConfirmOpen((o) => !o); }}
-                  disabled={!!bulkProgress}
-                  className="px-3 py-1.5 bg-danger text-white font-semibold rounded text-xs flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
-                  title={`Delete ${selected.size} item(s). Shift+click skips this prompt.`}
-                >
-                  <Trash2 size={11} />
-                  {bulkProgress
-                    ? `${bulkProgress.done} / ${bulkProgress.total}`
-                    : `Delete ${selected.size}`}
-                </button>
-                {confirmOpen && (
-                  <div
-                    role="dialog"
-                    className="absolute right-0 top-full mt-2 w-[300px] bg-panel border border-border rounded-lg shadow-xl z-20"
-                    style={{ animation: 'mvPopIn 120ms ease-out' }}
-                  >
-                    <div className="px-3.5 py-2.5 border-b border-border flex items-center justify-between">
-                      <div className="text-sm font-display font-semibold tracking-tight">Confirm cleanup</div>
-                      <button onClick={() => setConfirmOpen(false)} className="text-text-dim hover:text-text"><X size={13} /></button>
-                    </div>
-                    <div className="px-3.5 py-2.5 text-xs text-text-dim space-y-2">
-                      <div>
-                        Delete <span className="text-text font-mono">{selected.size}</span> {scope}{selected.size === 1 ? '' : 's'} ({humanSize(selectedSize)}) from Plex and disk.
-                      </div>
-                      <div className="text-warn">This cannot be undone.</div>
-                      <div className="text-[10px] text-text-dim/80 pt-1">
-                        Hold <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">Shift</kbd> next time to skip this prompt.
-                      </div>
-                    </div>
-                    <div className="px-3 py-2 border-t border-border flex items-center justify-end gap-2 bg-panel-2/50">
-                      <button onClick={() => setConfirmOpen(false)} className="px-2.5 py-1 text-xs rounded border border-border hover:bg-panel-2">Cancel</button>
-                      <button onClick={runBulkDelete} className="px-2.5 py-1 text-xs rounded bg-danger text-white font-semibold hover:opacity-90 inline-flex items-center gap-1.5">
-                        <Play size={11} /> Delete {selected.size}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={runBulkDelete}
+                disabled={!!bulkProgress}
+                className="px-3 py-1.5 bg-danger text-white font-semibold rounded text-xs flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                title={`Delete ${selected.size} item(s). Shift+click skips this prompt.`}
+              >
+                <Trash2 size={11} />
+                {bulkProgress
+                  ? `${bulkProgress.done} / ${bulkProgress.total}`
+                  : `Delete ${selected.size}`}
+              </button>
             </>
           )}
           {visibleCandidates.length > 0 && selected.size < visibleCandidates.length && (
@@ -315,6 +365,87 @@ export function CleanupList({ scope }: Props) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">{children}</kbd>;
+}
+
+function CleanupRuleBanner({
+  rule, ruleId, itemCount, progress, onProcess, onClear, backHref,
+}: {
+  rule: CleanupRuleDTO | null;
+  ruleId: number;
+  itemCount: number;
+  progress: BulkProgress | null;
+  onProcess: (e: React.MouseEvent) => void;
+  onClear: () => void;
+  backHref: string;
+}) {
+  const isException = rule?.kind === 'exception';
+  const wrapCls = isException
+    ? 'bg-good/8 border-b border-good/30 px-4 py-3'
+    : 'bg-warn/8 border-b border-warn/30 px-4 py-3';
+  const iconCls = isException
+    ? 'w-7 h-7 inline-flex items-center justify-center rounded-md bg-good/20 text-good flex-shrink-0'
+    : 'w-7 h-7 inline-flex items-center justify-center rounded-md bg-warn/20 text-warn flex-shrink-0';
+  const labelCls = isException
+    ? 'text-[10px] uppercase tracking-[0.16em] text-good font-medium'
+    : 'text-[10px] uppercase tracking-[0.16em] text-warn font-medium';
+  const linkCls = isException
+    ? 'text-[10px] text-good/80 hover:text-good underline underline-offset-2'
+    : 'text-[10px] text-warn/80 hover:text-warn underline underline-offset-2';
+  return (
+    <div className={wrapCls}>
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className={iconCls}>
+          {isException ? <ShieldCheck size={14} /> : <Sparkles size={14} />}
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className={labelCls}>Filtered by rule</div>
+            <Link href={backHref} className={linkCls}>all rules ↗</Link>
+          </div>
+          <div className="font-display font-semibold tracking-tight text-[15px] mt-0.5">{rule?.name ?? `Rule #${ruleId}`}</div>
+          {rule?.description && <div className="text-xs text-text-dim mt-0.5">{rule.description}</div>}
+          <div className="text-[11px] text-text-dim mt-1 flex flex-wrap gap-x-3">
+            <span>kind: <span className="font-mono text-text">{rule?.kind ?? '?'}</span></span>
+            <span><span className="font-mono text-text">{itemCount}</span> matched item{itemCount === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onClear}
+            className="px-2.5 py-1.5 text-xs rounded border border-border hover:bg-panel-2 inline-flex items-center gap-1.5"
+          >
+            <X size={11} /> Clear filter
+          </button>
+          {!isException && (
+            <button
+              onClick={onProcess}
+              disabled={!!progress || itemCount === 0}
+              className="px-3 py-1.5 text-xs rounded bg-danger text-white font-semibold hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1.5"
+              title="Delete every active candidate that matches this rule. Shift+click skips the prompt."
+            >
+              <Wand2 size={12} />
+              {progress ? `${progress.done} / ${progress.total}` : `Process rule (${itemCount})`}
+            </button>
+          )}
+        </div>
+      </div>
+      {progress && (
+        <div className="mt-2 h-1 bg-panel-2 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-danger transition-[width] duration-150"
+            style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
+          />
+        </div>
+      )}
+      {progress?.current && (
+        <div className="mt-1 text-[11px] text-text-dim font-mono truncate" title={progress.current}>Deleting: {progress.current}</div>
+      )}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, EyeOff, Trash2, Check, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, EyeOff, Trash2, Check, Sparkles, Wand2 } from 'lucide-react';
 import { humanSize } from '@/lib/format';
 import type { DupItem, MediaVersion } from '@/lib/types';
+import { useConfirm } from '@/lib/confirm';
 
 interface Props {
   item: DupItem;
@@ -15,6 +16,11 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const maxSize = Math.max(...item.media.map((m) => m.size), 1);
+  const confirm = useConfirm();
+
+  const recommendedVersion = item.recommended?.keepMediaId
+    ? item.media.find((m) => m.id === item.recommended!.keepMediaId)
+    : null;
 
   return (
     <div className="bg-panel border border-border rounded-lg p-4 mb-2.5 hover:border-text-dim/40 transition-colors">
@@ -58,10 +64,53 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
         <div className="text-warn text-xs font-mono font-semibold px-2.5 py-1 rounded-md whitespace-nowrap border border-warn/30 bg-warn/10">
           save {humanSize(item.savingsPotential)}
         </div>
+        {recommendedVersion && (
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (e.shiftKey) {
+                setBusy('rec');
+                await onKeepOnly(recommendedVersion.id);
+                setBusy(null);
+                return;
+              }
+              const others = item.media.filter((x) => x.id !== recommendedVersion.id);
+              const ok = await confirm({
+                title: 'Go with recommendation',
+                body: (
+                  <>
+                    Keep the <span className="font-mono">{recommendedVersion.resolution}</span>{' '}
+                    {recommendedVersion.videoCodec} ({humanSize(recommendedVersion.size)}) version and delete the{' '}
+                    <span className="font-mono">{others.length}</span> other version{others.length === 1 ? '' : 's'} of{' '}
+                    <span className="font-medium text-text">{item.title}</span> per rule{' '}
+                    <span className="text-accent">{item.recommended!.ruleName}</span>.
+                  </>
+                ),
+                danger: true,
+                confirmLabel: `Delete ${others.length}`,
+                hint: <>Hold <Kbd>Shift</Kbd> while clicking next time to skip this prompt.</>,
+              });
+              if (!ok) return;
+              setBusy('rec');
+              await onKeepOnly(recommendedVersion.id);
+              setBusy(null);
+            }}
+            disabled={busy !== null}
+            className="text-xs px-2.5 py-1.5 bg-accent text-accent-ink font-semibold rounded-md flex items-center gap-1.5 hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+            title={`Apply rule: keep ${recommendedVersion.resolution} ${recommendedVersion.videoCodec}, delete the rest. Shift+click to skip the prompt.`}
+          >
+            <Wand2 size={12} /> {busy === 'rec' ? 'Applying…' : 'Go with recommendation'}
+          </button>
+        )}
         <button
           onClick={async (e) => {
             e.stopPropagation();
-            if (!confirm(`Ignore "${item.title}"? Won't be considered for duplicate scans.`)) return;
+            const ok = await confirm({
+              title: `Ignore "${item.title}"?`,
+              body: <>This item won't be considered for future duplicate scans. You can restore it from the Ignored page.</>,
+              confirmLabel: 'Ignore',
+            });
+            if (!ok) return;
             setBusy('ignore');
             await onIgnore();
             setBusy(null);
@@ -85,14 +134,39 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
               }
               disabled={busy !== null}
               onDelete={async () => {
-                if (!confirm(`Delete this ${m.resolution} version from Plex + disk? File: ${m.file.split('/').pop()}`)) return;
+                const ok = await confirm({
+                  title: 'Delete this version',
+                  body: (
+                    <>
+                      Remove the <span className="font-mono">{m.resolution}</span> {m.videoCodec} version (
+                      <span className="font-mono">{humanSize(m.size)}</span>) of{' '}
+                      <span className="font-medium text-text">{item.title}</span> from Plex and disk.
+                      <div className="mt-2 text-[11px] font-mono text-text-dim break-all">{m.file}</div>
+                    </>
+                  ),
+                  danger: true,
+                  confirmLabel: 'Delete',
+                });
+                if (!ok) return;
                 setBusy(`del-${m.id}`);
                 await onDelete(m.id);
                 setBusy(null);
               }}
               onKeep={async () => {
                 const others = item.media.filter((x) => x.id !== m.id);
-                if (!confirm(`Delete the ${others.length} other version(s)? Keep only this one (${m.resolution}, ${humanSize(m.size)}).`)) return;
+                const ok = await confirm({
+                  title: 'Keep only this version',
+                  body: (
+                    <>
+                      Delete the <span className="font-mono">{others.length}</span> other version
+                      {others.length === 1 ? '' : 's'} and keep only{' '}
+                      <span className="font-mono">{m.resolution}</span> ({humanSize(m.size)}).
+                    </>
+                  ),
+                  danger: true,
+                  confirmLabel: `Delete ${others.length}`,
+                });
+                if (!ok) return;
                 setBusy(`keep-${m.id}`);
                 await onKeepOnly(m.id);
                 setBusy(null);
@@ -104,6 +178,10 @@ export function DupCard({ item, onDelete, onKeepOnly, onIgnore }: Props) {
       )}
     </div>
   );
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">{children}</kbd>;
 }
 
 function VersionRow({

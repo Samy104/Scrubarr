@@ -3,7 +3,7 @@ import type { DupItem, MediaVersion, RuleAction, RuleMatch, RuleDTO } from './ty
 declare module './types' {
   interface DupItem {
     /** rule-recommended action; UI uses this to highlight a "keep this" version */
-    recommended?: { action: string; keepMediaId?: string; ruleName: string };
+    recommended?: { action: string; keepMediaId?: string; ruleId: number; ruleName: string };
     /** Per-series preference outcome for TV/Anime episodes only.
      * autoClean: preferred version present and others can be deleted.
      * needsReview: preference set but no version matches, manual review required. */
@@ -85,7 +85,7 @@ export function applyRulesAnnotation(items: DupItem[], rules: { id: number; name
       if (!itemMatchesRule(it, r.match)) continue;
 
       if (r.action.kind === 'ignore' || r.action.kind === 'mark_review') {
-        it.recommended = { action: r.action.kind, ruleName: r.name };
+        it.recommended = { action: r.action.kind, ruleId: r.id, ruleName: r.name };
         break;
       }
       const v = pickRecommendedVersion(it, r.action);
@@ -93,6 +93,7 @@ export function applyRulesAnnotation(items: DupItem[], rules: { id: number; name
         it.recommended = {
           action: r.action.kind + (r.action.value ? `:${r.action.value}` : ''),
           keepMediaId: v.id,
+          ruleId: r.id,
           ruleName: r.name,
         };
         break;
