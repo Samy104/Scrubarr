@@ -18,7 +18,7 @@ interface PrefRow {
  * sometimes with a trailing "p". The dropdown saves "2160" / "1080" / "720".
  * Normalize both sides so the comparison is robust.
  */
-function normRes(s: string | null | undefined): string {
+export function normRes(s: string | null | undefined): string {
   if (!s) return '';
   const t = s.toLowerCase().trim().replace(/p$/, '');
   if (t === '4k' || t === 'uhd' || t === '2160') return '2160';

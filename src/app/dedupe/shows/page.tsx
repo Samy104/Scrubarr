@@ -1,13 +1,19 @@
 'use client';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play, X, Info,
+  Sparkles, Save, Trash2, AlertCircle, CheckCircle2, ListTree, RefreshCw, Play, X, Info, Layers, Wand2,
 } from 'lucide-react';
 import { humanSize } from '@/lib/format';
 import type { ShowSummary, SeriesPreferenceDTO } from '@/lib/types';
 import { useNotifications } from '@/lib/notifications';
+import { useConfirm } from '@/lib/confirm';
 import { MediaPoster } from '@/components/MediaPoster';
 import { InfoModal } from '@/components/InfoModal';
+import {
+  RESOLUTION_BUCKETS, countBuckets, matchesBucket, tiersFromMix,
+  type ResolutionBucket,
+} from '@/lib/resolutionFilter';
 
 const RESOLUTIONS = ['', '2160', '1080', '720', '480'];
 const CODECS = ['', 'hevc', 'h264', 'av1', 'mpeg4'];
@@ -20,10 +26,29 @@ export default function ShowsPage() {
   const [prefFilter, setPrefFilter] = useState<'all' | 'with' | 'without'>('all');
   const [query, setQuery] = useState('');
   const { notify } = useNotifications();
+  const confirm = useConfirm();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Resolution-mix filter, query-param backed so links are shareable.
+  const initialBucket = (searchParams?.get('resolutionFilter') as ResolutionBucket | null) ?? 'all';
+  const [resFilter, setResFilter] = useState<ResolutionBucket>(
+    RESOLUTION_BUCKETS.some((b) => b.value === initialBucket) ? initialBucket : 'all',
+  );
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    if (resFilter === 'all') params.delete('resolutionFilter');
+    else params.set('resolutionFilter', resFilter);
+    const qs = params.toString();
+    const next = qs ? `?${qs}` : (typeof window !== 'undefined' ? window.location.pathname : '');
+    router.replace(next, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resFilter]);
 
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [scannedAt, setScannedAt] = useState<number | null>(null);
+  const [bulk, setBulk] = useState<Progress | null>(null);
 
   const load = async () => {
     const params = new URLSearchParams();
@@ -48,15 +73,30 @@ export default function ShowsPage() {
       if (!s.showTitle.toLowerCase().includes(q)) return false;
       if (prefFilter === 'with' && !s.preference) return false;
       if (prefFilter === 'without' && s.preference) return false;
+      if (resFilter !== 'all' && !matchesBucket(tiersFromMix(s.resolutionMix), resFilter)) return false;
       return true;
     });
-  }, [shows, query, prefFilter]);
+  }, [shows, query, prefFilter, resFilter]);
 
   const prefCount = useMemo(() => {
     let withPref = 0;
     for (const s of shows) if (s.preference) withPref++;
     return { withPref, withoutPref: shows.length - withPref };
   }, [shows]);
+
+  // Counts per bucket — derived from the pref+lib-filtered set so the numbers
+  // shift sensibly as the user narrows the higher-level filters.
+  const bucketCounts = useMemo(
+    () => countBuckets(
+      shows.filter((s) => {
+        if (prefFilter === 'with' && !s.preference) return false;
+        if (prefFilter === 'without' && s.preference) return false;
+        return true;
+      }),
+      (s) => tiersFromMix(s.resolutionMix),
+    ),
+    [shows, prefFilter],
+  );
 
   const totals = useMemo(() => {
     return shows.reduce(
@@ -140,6 +180,108 @@ export default function ShowsPage() {
     return { deleted: ok, failed };
   };
 
+  /**
+   * Streams the multi-show bulk-clean endpoint. Identical NDJSON contract as
+   * runAutoClean above, just driven by a JSON body with the temporary
+   * resolution preference instead of a stored SeriesPreference.
+   */
+  const runBulkClean = useCallback(async (
+    showRatingKeys: string[],
+    prefResolution: string,
+    onProgress: (p: Progress) => void,
+  ): Promise<{ deleted: number; failed: number }> => {
+    const resp = await fetch('/api/shows/bulk-clean', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ showRatingKeys, prefResolution, triggeredBy: 'bulk-keep-resolution' }),
+    });
+    if (!resp.body) return { deleted: 0, failed: 0 };
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let total = 0, ok = 0, failed = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === 'start') { total = ev.total; onProgress({ done: 0, total, ok: 0, failed: 0 }); }
+          else if (ev.type === 'progress') {
+            ok = ev.ok; failed = ev.failed;
+            onProgress({ done: ev.done, total, ok, failed, current: ev.current });
+          } else if (ev.type === 'done') {
+            ok = ev.deleted; failed = ev.failed;
+          }
+        } catch {}
+      }
+    }
+    return { deleted: ok, failed };
+  }, []);
+
+  /** Estimated bytes to be freed by Keep-1080p across the given shows. */
+  const estimateKeep1080Savings = (targets: ShowSummary[]): { bytes: number; episodes: number } => {
+    // Per-show savings is hard to compute without the full episode list — use
+    // the show-level savingsPotential as a conservative aggregate (the user
+    // gets the savings of these shows IF they accept losing every non-1080p).
+    let bytes = 0;
+    let episodes = 0;
+    for (const s of targets) {
+      bytes += s.savingsPotential;
+      episodes += s.episodeCount;
+    }
+    return { bytes, episodes };
+  };
+
+  const onKeep1080Click = async (skipPrompt: boolean) => {
+    const targets = filtered.filter((s) =>
+      matchesBucket(tiersFromMix(s.resolutionMix), '1080-720'),
+    );
+    if (targets.length === 0) {
+      notify({ kind: 'info', title: 'Nothing to clean', body: 'No shows in the current filter match the 1080p + 720p pattern.' });
+      return;
+    }
+    const est = estimateKeep1080Savings(targets);
+    if (!skipPrompt) {
+      const ok = await confirm({
+        title: 'Keep 1080p across shows',
+        body: (
+          <>
+            Delete every non-1080p version on <span className="font-mono">{targets.length}</span> show
+            {targets.length === 1 ? '' : 's'} (<span className="font-mono">{est.episodes}</span> duplicate episode
+            {est.episodes === 1 ? '' : 's'}). Estimated up to <span className="font-mono">{humanSize(est.bytes)}</span> freed.
+          </>
+        ),
+        danger: true,
+        confirmLabel: `Keep 1080p on ${targets.length}`,
+        hint: <>Hold <Kbd>Shift</Kbd> while clicking next time to skip this prompt.</>,
+      });
+      if (!ok) return;
+    }
+    setBulk({ done: 0, total: 0, ok: 0, failed: 0 });
+    try {
+      const result = await runBulkClean(
+        targets.map((s) => s.showRatingKey),
+        '1080',
+        setBulk,
+      );
+      notify({
+        kind: result.failed ? 'warn' : 'success',
+        title: `Bulk Keep 1080p: ${targets.length} show${targets.length === 1 ? '' : 's'}`,
+        body: `${result.deleted} version${result.deleted === 1 ? '' : 's'} deleted${result.failed ? `, ${result.failed} failed` : ''}`,
+      });
+      await fetch('/api/rescan', { method: 'POST' });
+      setTimeout(load, 1500);
+    } finally {
+      setTimeout(() => setBulk(null), 1800);
+    }
+  };
+
   return (
     <div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 pr-16 bg-panel border-b border-border sticky top-0 z-10">
@@ -200,10 +342,54 @@ export default function ShowsPage() {
           <option value="with">With preference ({prefCount.withPref})</option>
           <option value="without">Without preference ({prefCount.withoutPref})</option>
         </select>
+        <select
+          value={resFilter}
+          onChange={(e) => setResFilter(e.target.value as ResolutionBucket)}
+          className="px-3 py-1.5 bg-panel-2 border border-border rounded text-sm"
+          title="Filter by resolution mix"
+        >
+          {RESOLUTION_BUCKETS.map((b) => (
+            <option key={b.value} value={b.value}>
+              {b.label} ({bucketCounts[b.value]})
+            </option>
+          ))}
+        </select>
+        <Keep1080Button
+          eligible={bucketCounts['1080-720']}
+          busy={!!bulk}
+          progress={bulk}
+          onClick={(e) => onKeep1080Click(!!(e as React.MouseEvent).shiftKey)}
+          active={resFilter === '1080-720'}
+        />
         <div className="text-xs text-text-dim">
           {filtered.length} shown
         </div>
       </div>
+
+      {bulk && (
+        <div className="px-4 py-2 border-b border-border bg-accent/8">
+          <div className="flex items-center gap-3">
+            <Layers size={14} className="text-accent flex-shrink-0" />
+            <div className="text-[11px] uppercase tracking-[0.16em] text-accent font-medium">
+              Bulk Keep 1080p
+            </div>
+            <div className="text-xs font-mono text-text-dim">
+              {bulk.done} / {bulk.total} · ok {bulk.ok}{bulk.failed ? ` · failed ${bulk.failed}` : ''}
+            </div>
+            {bulk.current && (
+              <div className="text-[11px] text-text-dim truncate font-mono" title={bulk.current}>
+                {bulk.current}
+              </div>
+            )}
+          </div>
+          <div className="mt-1.5 h-1 bg-panel-2 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent transition-[width] duration-150"
+              style={{ width: `${bulk.total ? Math.round((bulk.done / bulk.total) * 100) : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="p-4 max-w-6xl mx-auto">
         <p className="text-sm text-text-dim mb-4 max-w-3xl">
@@ -242,6 +428,50 @@ export default function ShowsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">
+      {children}
+    </kbd>
+  );
+}
+
+function Keep1080Button({
+  eligible,
+  busy,
+  progress,
+  onClick,
+  active,
+}: {
+  eligible: number;
+  busy: boolean;
+  progress: Progress | null;
+  onClick: (e: React.MouseEvent) => void;
+  active: boolean;
+}) {
+  const disabled = busy || eligible === 0;
+  const title = eligible === 0
+    ? 'No shows currently match the 1080p + 720p pattern in the active filters.'
+    : `Across the ${eligible} matching show${eligible === 1 ? '' : 's'}, delete every non-1080p version. Shift+click skips the prompt.`;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`px-3 py-1.5 text-xs rounded font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+        active
+          ? 'bg-accent text-accent-ink hover:opacity-90'
+          : 'bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25'
+      }`}
+    >
+      <Wand2 size={12} />
+      {progress
+        ? `${progress.done} / ${progress.total}`
+        : `Keep 1080p (${eligible})`}
+    </button>
   );
 }
 

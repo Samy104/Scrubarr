@@ -4,10 +4,16 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { StatsBar } from './StatsBar';
 import { DupCard } from './DupCard';
-import type { DupItem, ScanCache, RuleDTO } from '@/lib/types';
-import { Search, Sparkles, Play, X, Wand2 } from 'lucide-react';
+import type { DupItem, MediaVersion, ScanCache, RuleDTO } from '@/lib/types';
+import { Search, Sparkles, Play, X, Wand2, Layers, Scissors } from 'lucide-react';
 import { useNotifications } from '@/lib/notifications';
 import { useConfirm } from '@/lib/confirm';
+import { humanSize } from '@/lib/format';
+import { normRes } from '@/lib/seriesPref';
+import {
+  RESOLUTION_BUCKETS, countBuckets, matchesBucket, tiersFromResolutions,
+  type ResolutionBucket,
+} from '@/lib/resolutionFilter';
 
 interface Props {
   /** restrict to a section type */
@@ -36,6 +42,21 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
 
   const [pageSize, setPageSize] = useState(200);
 
+  // Resolution-mix filter, query-param backed so links are shareable.
+  const initialBucket = (searchParams?.get('resolutionFilter') as ResolutionBucket | null) ?? 'all';
+  const [resFilter, setResFilter] = useState<ResolutionBucket>(
+    RESOLUTION_BUCKETS.some((b) => b.value === initialBucket) ? initialBucket : 'all',
+  );
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    if (resFilter === 'all') params.delete('resolutionFilter');
+    else params.set('resolutionFilter', resFilter);
+    const qs = params.toString();
+    const next = qs ? `?${qs}` : (typeof window !== 'undefined' ? window.location.pathname : '');
+    router.replace(next, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resFilter]);
+
   const load = async () => {
     try {
       const params = new URLSearchParams();
@@ -62,7 +83,9 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
       .catch(() => setRule(null));
   }, [activeRuleId]);
 
-  const items = useMemo(() => {
+  // Bucket counts are derived from the search/recommendation-narrowed set, so
+  // narrowing the search bar also adjusts the (N) tallies in the dropdown.
+  const preBucketItems = useMemo(() => {
     if (!cache) return [];
     let out = cache.items;
     if (query) {
@@ -75,6 +98,19 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
       );
     }
     if (showOnlyRec) out = out.filter((x) => x.recommended);
+    return out;
+  }, [cache, query, showOnlyRec]);
+
+  const bucketCounts = useMemo(
+    () => countBuckets(preBucketItems, (it) => tiersFromResolutions(it.media.map((m) => m.resolution))),
+    [preBucketItems],
+  );
+
+  const items = useMemo(() => {
+    let out = preBucketItems;
+    if (resFilter !== 'all') {
+      out = out.filter((x) => matchesBucket(tiersFromResolutions(x.media.map((m) => m.resolution)), resFilter));
+    }
     const sorts: Record<typeof sort, (a: DupItem, b: DupItem) => number> = {
       savings: (a, b) => b.savingsPotential - a.savingsPotential,
       title: (a, b) => a.title.localeCompare(b.title),
@@ -82,7 +118,7 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
       size: (a, b) => b.totalSize - a.totalSize,
     };
     return [...out].sort(sorts[sort]);
-  }, [cache, query, sort, showOnlyRec, filterSection]);
+  }, [preBucketItems, sort, resFilter]);
 
   const handleDelete = async (rk: string, mediaId: string) => {
     const item = cache?.items.find((x) => x.ratingKey === rk);
@@ -128,6 +164,154 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
   const handleRescan = async () => {
     await fetch('/api/rescan', { method: 'POST' });
     setTimeout(load, 2000);
+  };
+
+  /** Pick the largest version that satisfies normRes(m.resolution) === tier. */
+  const pickLargestByTier = (media: MediaVersion[], tier: string): MediaVersion | null => {
+    const candidates = media.filter((m) => normRes(m.resolution) === tier);
+    if (candidates.length === 0) return null;
+    return [...candidates].sort((a, b) => (b.size ?? 0) - (a.size ?? 0))[0];
+  };
+
+  /** Pick versions where the normalized tier is <= 720 (i.e. 720 or 480). */
+  const pickLowResVersions = (media: MediaVersion[]): MediaVersion[] =>
+    media.filter((m) => {
+      const t = normRes(m.resolution);
+      return t === '720' || t === '480';
+    });
+
+  const runBulkAcrossItems = async (
+    targets: DupItem[],
+    decide: (it: DupItem) => { keepId?: string; deleteIds: string[] },
+    triggerLabel: string,
+  ): Promise<{ done: number; ok: number; failed: number; freedBytes: number }> => {
+    setBulk({ done: 0, total: targets.length, ok: 0, failed: 0 });
+    let ok = 0, failed = 0, freedBytes = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const it = targets[i];
+      const plan = decide(it);
+      if (plan.deleteIds.length === 0) {
+        setBulk({ done: i + 1, total: targets.length, ok, failed, current: it.title });
+        continue;
+      }
+      let perItemFail = 0;
+      for (const mediaId of plan.deleteIds) {
+        const m = it.media.find((x) => x.id === mediaId);
+        const r = await fetch(`/api/dupes/${it.ratingKey}/media/${mediaId}`, { method: 'DELETE' });
+        const d = await r.json().catch(() => ({ ok: false }));
+        if (d.ok) {
+          freedBytes += m?.size ?? 0;
+        } else {
+          perItemFail++;
+        }
+      }
+      if (perItemFail === 0) ok++; else failed++;
+      setBulk({ done: i + 1, total: targets.length, ok, failed, current: it.title });
+    }
+    notify({
+      kind: failed ? 'warn' : 'success',
+      title: triggerLabel,
+      body: `${ok} item${ok === 1 ? '' : 's'} processed${failed ? `, ${failed} failed` : ''} · ${humanSize(freedBytes)} freed`,
+    });
+    setTimeout(() => setBulk(null), 1800);
+    await load();
+    return { done: targets.length, ok, failed, freedBytes };
+  };
+
+  const onKeep1080 = async (skipPrompt: boolean) => {
+    // Items in the current filtered set that match 1080-720 pattern.
+    const targets = items.filter((x) =>
+      matchesBucket(tiersFromResolutions(x.media.map((m) => m.resolution)), '1080-720'),
+    );
+    if (targets.length === 0) {
+      notify({ kind: 'info', title: 'Nothing to clean', body: 'No items currently match the 1080p + 720p pattern.' });
+      return;
+    }
+    // Pre-compute the per-item plan + size estimate.
+    let estimateBytes = 0;
+    let estimateDeletes = 0;
+    for (const it of targets) {
+      const keep = pickLargestByTier(it.media, '1080');
+      if (!keep) continue;
+      for (const m of it.media) {
+        if (m.id === keep.id) continue;
+        estimateBytes += m.size ?? 0;
+        estimateDeletes++;
+      }
+    }
+    if (!skipPrompt) {
+      const ok = await confirm({
+        title: 'Keep 1080p across items',
+        body: (
+          <>
+            Delete <span className="font-mono">{estimateDeletes}</span> non-1080p version
+            {estimateDeletes === 1 ? '' : 's'} across <span className="font-mono">{targets.length}</span> item
+            {targets.length === 1 ? '' : 's'}. Estimated <span className="font-mono">{humanSize(estimateBytes)}</span> freed.
+          </>
+        ),
+        danger: true,
+        confirmLabel: `Keep 1080p on ${targets.length}`,
+        hint: <>Hold <Kbd>Shift</Kbd> while clicking next time to skip this prompt.</>,
+      });
+      if (!ok) return;
+    }
+    await runBulkAcrossItems(
+      targets,
+      (it) => {
+        const keep = pickLargestByTier(it.media, '1080');
+        if (!keep) return { deleteIds: [] };
+        return {
+          keepId: keep.id,
+          deleteIds: it.media.filter((m) => m.id !== keep.id).map((m) => m.id),
+        };
+      },
+      `Bulk Keep 1080p`,
+    );
+  };
+
+  /** Drop 720p (and lower) versions on items that still have a 1080p+ version available. */
+  const onDrop720 = async (skipPrompt: boolean) => {
+    const targets = items.filter((x) => {
+      const tiers = tiersFromResolutions(x.media.map((m) => m.resolution));
+      // require a 720 (or lower) and at least one 1080+
+      const hasLow = tiers.has('720') || tiers.has('480');
+      const hasHigh = tiers.has('1080') || tiers.has('2160');
+      return hasLow && hasHigh;
+    });
+    if (targets.length === 0) {
+      notify({ kind: 'info', title: 'Nothing to drop', body: 'No items in the current filter have both a 720p and a 1080p+ version.' });
+      return;
+    }
+    let estimateBytes = 0;
+    let estimateDeletes = 0;
+    for (const it of targets) {
+      for (const m of pickLowResVersions(it.media)) {
+        estimateBytes += m.size ?? 0;
+        estimateDeletes++;
+      }
+    }
+    if (!skipPrompt) {
+      const ok = await confirm({
+        title: 'Drop 720p where 1080p+ exists',
+        body: (
+          <>
+            Delete <span className="font-mono">{estimateDeletes}</span> low-res version
+            {estimateDeletes === 1 ? '' : 's'} across <span className="font-mono">{targets.length}</span> item
+            {targets.length === 1 ? '' : 's'}. Single-version items are skipped. Estimated{' '}
+            <span className="font-mono">{humanSize(estimateBytes)}</span> freed.
+          </>
+        ),
+        danger: true,
+        confirmLabel: `Drop 720p on ${targets.length}`,
+        hint: <>Hold <Kbd>Shift</Kbd> while clicking next time to skip this prompt.</>,
+      });
+      if (!ok) return;
+    }
+    await runBulkAcrossItems(
+      targets,
+      (it) => ({ deleteIds: pickLowResVersions(it.media).map((m) => m.id) }),
+      'Bulk Drop 720p',
+    );
   };
 
   const processRule = async (skipPrompt: boolean) => {
@@ -255,6 +439,40 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
           <option value="versions">Sort: version count</option>
           <option value="size">Sort: total size</option>
         </select>
+        <select
+          value={resFilter}
+          onChange={(e) => setResFilter(e.target.value as ResolutionBucket)}
+          className="px-3 py-1.5 bg-panel-2 border border-border rounded-md text-sm focus:outline-none focus:border-accent"
+          title="Filter by resolution mix"
+        >
+          {RESOLUTION_BUCKETS.map((b) => (
+            <option key={b.value} value={b.value}>
+              {b.label} ({bucketCounts[b.value]})
+            </option>
+          ))}
+        </select>
+        {resFilter === '1080-720' && (
+          <BulkActionButton
+            kind="keep"
+            label={`Keep 1080p (${bucketCounts['1080-720']})`}
+            count={bucketCounts['1080-720']}
+            busy={!!bulk}
+            progress={bulk}
+            onClick={(e) => onKeep1080(!!(e as React.MouseEvent).shiftKey)}
+            disabledHint="No items in the current filter match the 1080p + 720p pattern."
+          />
+        )}
+        {bucketCounts['720-any'] > 0 && (
+          <BulkActionButton
+            kind="drop"
+            label={`Drop 720p (${bucketCounts['720-any']})`}
+            count={bucketCounts['720-any']}
+            busy={!!bulk}
+            progress={bulk}
+            onClick={(e) => onDrop720(!!(e as React.MouseEvent).shiftKey)}
+            disabledHint="No items in the current filter have a 720p version alongside a 1080p+ version."
+          />
+        )}
         <label className="flex items-center gap-2 text-sm text-text-dim cursor-pointer">
           <input
             type="checkbox"
@@ -268,6 +486,31 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
           {items.length} shown of {cache?.count ?? 0}
         </div>
       </div>
+
+      {!activeRuleId && bulk && (
+        <div className="px-4 py-2 border-b border-border bg-accent/8">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Layers size={14} className="text-accent flex-shrink-0" />
+            <div className="text-[11px] uppercase tracking-[0.16em] text-accent font-medium">
+              Bulk action
+            </div>
+            <div className="text-xs font-mono text-text-dim">
+              {bulk.done} / {bulk.total} · ok {bulk.ok}{bulk.failed ? ` · failed ${bulk.failed}` : ''}
+            </div>
+            {bulk.current && (
+              <div className="text-[11px] text-text-dim truncate font-mono" title={bulk.current}>
+                {bulk.current}
+              </div>
+            )}
+          </div>
+          <div className="mt-1.5 h-1 bg-panel-2 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent transition-[width] duration-150"
+              style={{ width: `${bulk.total ? Math.round((bulk.done / bulk.total) * 100) : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
       <div className="p-4 max-w-6xl mx-auto">
         {cache?.error && (
           <div className="bg-danger/10 border border-danger/40 text-danger p-3 rounded-md mb-3 text-sm">
@@ -304,6 +547,38 @@ export function DupList({ filterSection, emptyTitle, libraryFilter }: Props) {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return <kbd className="px-1 py-px bg-panel-2 border border-border rounded font-mono text-[10px]">{children}</kbd>;
+}
+
+function BulkActionButton({
+  kind, label, count, busy, progress, onClick, disabledHint,
+}: {
+  kind: 'keep' | 'drop';
+  label: string;
+  count: number;
+  busy: boolean;
+  progress: BulkProgress | null;
+  onClick: (e: React.MouseEvent) => void;
+  disabledHint: string;
+}) {
+  const disabled = busy || count === 0;
+  const baseTitle = kind === 'keep'
+    ? 'Across the matching items, delete every non-1080p version and keep the largest 1080p. Shift+click skips the prompt.'
+    : 'Across the matching items, delete every 720p (or lower) version where a 1080p or 2160p version is also present. Single-version items are skipped. Shift+click skips the prompt.';
+  const title = count === 0 ? disabledHint : baseTitle;
+  const classes = kind === 'keep'
+    ? 'bg-accent/15 text-accent border border-accent/40 hover:bg-accent/25'
+    : 'bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25';
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`px-3 py-1.5 text-xs rounded font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${classes}`}
+    >
+      {kind === 'keep' ? <Wand2 size={12} /> : <Scissors size={12} />}
+      {progress ? `${progress.done} / ${progress.total}` : label}
+    </button>
+  );
 }
 
 export function RuleBanner({
