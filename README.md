@@ -105,6 +105,27 @@ Toggle in the sidebar's top-right corner. Background is a warm light grey rather
 ![Light dedupe shows](screenshots/18-light-dedupe-shows.png)
 ![Light cleanup movies](screenshots/19-light-cleanup-movies.png)
 
+## Application structure
+
+```
+Scrubarr
+├── Dedupe                     same item, multiple files
+│   ├── Movies                 movie duplicates
+│   ├── By episode             TV + Anime duplicates merged
+│   ├── By series              per-show preferences + auto-clean
+│   ├── Rules                  annotate dup items with a "keep this" recommendation
+│   └── Ignored                items excluded from dedupe scans
+└── Cleanup                    whole items, based on watch + ratings
+    ├── Movies                 candidate movies for deletion
+    ├── Shows                  candidate shows for deletion
+    ├── Rules                  exception (always keep) + eligibility (mark candidate)
+    └── Ignored                items exempted from cleanup
+```
+
+The two modules answer different questions. **Dedupe** is about a single library item that holds more than one file on disk — a movie with both a 1080p and a 4K version, an episode with both a REMUX and a WEB-DL — and the action is to pick which file to keep and delete the rest. **Cleanup** is about whole items: titles that exist exactly once but, based on your watch history and ratings, can be retired from the library entirely.
+
+They share UI primitives (the resolution-mix dropdown, the info modal, the confirm dialog, the notification bell, the ignore-list pattern) but the data models, the rule schemas, and the destructive endpoints are separate.
+
 ## Features
 
 - **Dedupe and Cleanup as separate modules**, each with Movies, Shows, Rules, and Ignored pages under `/dedupe/*` and `/cleanup/*`.
@@ -122,6 +143,203 @@ Toggle in the sidebar's top-right corner. Background is a warm light grey rather
 - **Responsive UI**: works on desktop and mobile, dark and light theme.
 - **Auto-rescan**: pulls fresh data from Plex every 15 seconds while you have the page open. Trigger a full rescan on demand from the header.
 
+## Cleanup module
+
+Cleanup walks the full movie and show libraries (not just the duplicates) and evaluates every title against the cleanup rule set. The output is a list of **candidates** you can delete in bulk, with **protected** titles (matched by an exception rule) shown alongside so it is clear why a title is safe.
+
+### Rule kinds
+
+Cleanup rules come in two kinds, and the order matters:
+
+- **Exception** rules protect items. If any exception rule matches a title, that title is **never** a candidate, regardless of how many eligibility rules also match it. Exception always wins, priority is irrelevant for that decision.
+- **Eligibility** rules nominate items. An eligibility rule needs both its match clauses and its watched-state condition to be satisfied before the title becomes a candidate.
+
+A title becomes a candidate when at least one eligibility rule matches and **no** exception rule matches. Items on the cleanup ignore list are excluded before any rule runs.
+
+### Match clauses
+
+Match clauses are the same shape for both rule kinds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `titleRegex` | string | Case-insensitive JS regex tested against the title |
+| `yearMin`, `yearMax` | number | Inclusive year range |
+| `libraries` | string[] | Plex library names to restrict to |
+| `genres` | string[] | Any-of match against Plex genres |
+| `collections` | string[] | Any-of match against Plex collection memberships |
+| `studios` | string[] | Any-of match against studio |
+| `contentRatings` | string[] | Any-of match against `contentRating` (`PG-13`, `TV-MA`, ...) |
+
+`studios` and `collections` are evaluated as "either of": a single rule that lists both `studios: ["DC Comics"]` and `collections: ["DC Extended Universe"]` matches titles that are tagged with the DC studio **or** belong to the DCEU collection. This is the most common shape for "always keep this franchise" rules.
+
+### Eligibility conditions
+
+Eligibility rules add a `condition` block on top of the match clauses. All fields are optional; the ones that are set are AND-ed together.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `viewCountMin`, `viewCountMax` | number | Inclusive range over Plex `viewCount` |
+| `daysSinceLastViewMin`, `daysSinceLastViewMax` | number | Days since `lastViewedAt`; never-viewed items pass `min` but fail `max` |
+| `neverViewed` | boolean | Title has no `lastViewedAt` |
+| `ratingMin`, `ratingMax` | number | Third-party `rating` (IMDb / Rotten Tomatoes critic), 0..10 |
+| `userRatingMin`, `userRatingMax` | number | Your own `userRating`, 0..10 |
+| `audienceRatingMin`, `audienceRatingMax` | number | Audience rating, 0..10 |
+| `showCompletionMin`, `showCompletionMax` | number | For shows only: `viewedLeafCount / leafCount`, 0..1 |
+
+### Default seeded rules
+
+A fresh database is seeded with a sensible starting set:
+
+- **Always keep Marvel** — exception, `studios` contains `Marvel`
+- **Always keep DC** — exception, `studios` contains `DC` **or** `collections` contains `DC Extended Universe`
+- **Always keep Marvel TV** — exception, show scope, `studios` contains `Marvel`
+- **Unwatched and poorly rated** — eligibility, `neverViewed: true` + `ratingMax: 5`
+- **Watched once, poorly rated** — eligibility, `viewCount` in `1..1` + `ratingMax: 5`
+- **Stale shows never finished** — eligibility, show scope, `daysSinceLastViewMin: 365` + `showCompletionMax: 0.5`
+
+Delete any rule you don't want; they are not enforced as system rules.
+
+### Candidate list flow
+
+The candidate list is one row per title. Each row has:
+
+- a checkbox for multi-select
+- the Plex poster and title
+- one or more matched-rule chips, color-coded by kind (green = exception, orange = eligibility) so the reason a title is on the list (or protected) is visible at a glance
+- a per-row delete action
+- a per-row **Ignore** action (eye-off icon) that moves the title to the cleanup ignore list
+
+The page header shows the total reclaimable size for the current selection and a toggle to view **Candidates only** or the full library with annotations. The bulk-delete button takes the multi-select set through the global confirm modal, streams progress, and pushes a notification per delete. Shift-click skips the prompt.
+
+### View matches and process rule
+
+Every rule card has a **View matches** link that opens the candidate list filtered to that single rule. A banner at the top of the filtered view shows the rule name, description, action, current match count, a **Clear filter** link, and a **Process rule (N)** button. Clicking **Process rule** deletes every active candidate the rule currently matches in one streamed pass. For exception rules the Process button is hidden — exception rules only protect, they don't delete.
+
+### Cleanup ignore list
+
+Items moved to the cleanup ignore list are excluded from candidate evaluation entirely, regardless of how many eligibility rules they match. Restore is one click and immediately re-runs the evaluation.
+
+## Series preferences
+
+The **By series** page lets you pin a preferred version per show: a resolution (`2160p` / `1080p` / `720p` / `480p`), an optional codec substring (`x265`, `h264`, `av1`, ...), and a **Prefer REMUX** flag. Each preference is stored per `ratingKey` and re-applied on every render of the page.
+
+### Resolution normalization
+
+Plex reports resolution as a mix of `4k`, `uhd`, `2160`, `2160p`, `1080`, `1080p`, and so on. Internally Scrubarr normalizes these so `4k`, `uhd`, and `2160p` all collapse to `2160` before comparison. Preferences are stored in the normalized form.
+
+### autoClean vs needsReview
+
+Once a preference is set, every episode of the series is annotated:
+
+- **autoClean** — the preferred version exists, the other versions can be safely deleted on the next auto-clean run.
+- **needsReview** — no version matches the preference. The episode is left for manual review in the **By episode** list.
+
+The summary card for the series shows both counts plus the total reclaimable size.
+
+### Prefer REMUX is a soft tiebreaker
+
+**Prefer REMUX is not a hard filter.** If the show has at least one REMUX version at the preferred resolution, that REMUX wins. If no REMUX exists at the preferred resolution, the largest non-REMUX at the preferred resolution still wins and the episode is still `autoClean`. This is intentional — making REMUX a hard filter caused a class of "lost everything to needs-review" failures where a show without any REMUX masters would have zero auto-cleanable episodes despite a clear best version being available.
+
+### Auto-clean and the popover
+
+The per-show **Auto-clean** button streams an NDJSON response from `/api/shows/{ratingKey}/auto-clean`: `start` with the total count, a `progress` event per episode (with `current` and the episode title), and a final `done` event with success / failure counts. The UI shows a progress bar plus the current episode title.
+
+The confirmation popover is anchored to the button so the action is local to the row. Click for the prompt; Shift-click to skip it entirely. Saving a preference collapses the inline editor automatically, so you can blast through a list of shows without bouncing back and forth.
+
+## Rule-process flow
+
+Both the dedupe rules page and the cleanup rules page wire each rule card to the same **View matches** + **Process rule** pattern.
+
+- **View matches** deep-links to the corresponding candidates page (`/dedupe/movies?ruleId=...` or `/cleanup/movies?ruleId=...`) with a filter applied.
+- The filtered view shows a banner with the rule name, description, action, current match count, **Clear filter**, and **Process rule (N)** buttons.
+
+What Process does depends on the rule kind:
+
+| Rule type | Action | Process behavior |
+|---|---|---|
+| Dedupe | `prefer_resolution`, `prefer_codec`, `prefer_largest` | Per item: keep the recommended version, delete the rest |
+| Dedupe | `ignore` | Bulk-add every matched item to the dedupe ignore list |
+| Dedupe | `mark_review` | No-op, the rule is annotation-only |
+| Cleanup eligibility | (n/a) | Delete every active candidate the rule matches |
+| Cleanup exception | (n/a) | Process button is hidden |
+
+Shift-click on **Process rule** skips the confirm prompt. Progress streams in via NDJSON and is rendered as a bar with the per-item title under the banner.
+
+## Resolution-mix bulk actions
+
+The **Resolution mix** dropdown on `/dedupe/movies`, `/dedupe/episodes`, and `/dedupe/shows` slices the visible list by the exact resolution shape each item holds. Buckets:
+
+| Bucket | Meaning |
+|---|---|
+| `all` | No filter |
+| `1080p only` | Every version is 1080p |
+| `720p only` | Every version is 720p |
+| `1080p + 720p (no 4K)` | Mix of 1080p and 720p, nothing higher |
+| `4K + 1080p (no 720p)` | One 4K plus one 1080p, no 720p |
+| `4K + 1080p + 720p` | All three present |
+| `Has any 4K version` | At least one 4K version |
+| `Has any 720p version` | At least one 720p version |
+
+Counts next to each option are live and reflect the cache after the title search and any preference filters have been applied.
+
+Two bulk actions appear conditionally next to the dropdown:
+
+- **Keep 1080p (N)** — visible on `/dedupe/shows` when the filter is set to `1080p + 720p (no 4K)`. Streams a multi-show NDJSON bulk-clean (`/api/shows/bulk-clean`) that keeps the largest 1080p version of each duplicated episode and deletes everything else.
+- **Drop 720p (where 1080p+ exists)** — visible on `/dedupe/movies` and `/dedupe/episodes`. For each matched item, deletes only the 720p version, and only if a 1080p or 2160p sibling exists. Single-version items are protected by that guard.
+
+Both actions go through the global confirm modal with the Shift-skip shortcut. The `4K + 1080p (no 720p)` bucket intentionally has no bulk action because the call between 4K and 1080p is per-title and not bulk-safe; surfacing the bucket on its own is the point — it's where to focus when reviewing manually.
+
+## Notification bell
+
+The bell in the top-right shows an unread badge with the count of unread notifications. The dropdown panel renders the last 50 events. Each entry has:
+
+- a kind icon (success, info, warn, error)
+- the title
+- a relative timestamp
+- an optional body line
+- a per-item check icon to mark that single notification read
+- a **Mark all read** footer
+- a **Clear all** action
+
+Notifications are persisted to `localStorage` and so do **not** sync across browsers or devices. They are written automatically on every destructive action: deletes, keep-only operations, ignore moves, preference saves, per-show and bulk auto-clean batches, rule-process runs, and cleanup deletes. They replace every native `alert()` call.
+
+## Confirm dialog
+
+Destructive actions route through `useConfirm()`, a single centralized modal. The dialog is rendered into a portal, centered on the viewport, backed by a blurred and dimmed backdrop. Escape and click-outside cancel; Enter confirms; focus is trapped while it's open.
+
+Two variants:
+
+- **danger** — destructive actions, red accent, used for delete, keep-only, drop 720p, keep 1080p, process rule, auto-clean batches, cleanup delete
+- **accent** — neutral confirmations, app accent color
+
+**Shift-click on any destructive action button skips the confirm entirely.** The shortcut works on **Process rule**, **Auto-clean**, every bulk delete, **Drop 720p**, **Keep 1080p**, per-version **Delete this**, **Keep only this**, and **Go with recommendation**. The dialog replaces every native `confirm()` call.
+
+## Info modal
+
+Triggered by the info icon next to every poster on dedupe and cleanup rows. The shape mirrors Plex and Letterboxd:
+
+- 16:7 backdrop hero at the top, sourced from Plex art
+- 2:3 poster overlapping the bottom-left of the backdrop
+- title in Outfit, large
+- meta line: year, content rating, runtime, studio, critic rating, audience rating, release date
+- italic tagline with an accent left border
+- summary
+- genre chips
+- two columns for director and writer
+- circular cast portraits with name + role
+
+The modal is portal-rendered to escape the transform-based containing blocks above it — without that, the cleanup row's fade-up animation clips the modal inside the row. It closes on backdrop click, the X icon, and Escape, and animates in through the existing `mvPopIn` keyframe.
+
+## Posters and the thumb proxy
+
+Posters are served by Scrubarr, not directly by Plex, via `/api/thumb/{ratingKey}` (poster) and `/api/thumb/{ratingKey}/art` (backdrop). The proxy:
+
+- holds the Plex token server-side — it never reaches the browser
+- returns `Cache-Control: max-age=86400, stale-while-revalidate=604800`, so the browser caches the poster for a day and can keep serving the stale copy for a week while refreshing
+- falls back to a deterministic colored tile with the title initial when Plex has no thumb for the item
+
+For episode rows the show's poster is used, not the per-episode thumbnail. Scene stills don't help when you're scrubbing the list visually.
+
 ## How it works
 
 1. On startup, Scrubarr asks Plex for every library section.
@@ -130,6 +348,9 @@ Toggle in the sidebar's top-right corner. Background is a warm light grey rather
 4. Each Media version is enriched with parsed quality tags from its filename (REMUX, BluRay, WEB-DL, HDR, HDR10, DV, Atmos, MULTI, FRENCH, PROPER, and more).
 5. For Cleanup, every title in the configured libraries is evaluated against every cleanup rule — eligibility rules mark candidates, exception rules veto them. The result set is cached and refreshed on every rescan.
 6. The result is served to the UI as JSON. The cache is also reconciled on every rescan: items that no longer qualify (no duplicates left, no matching cleanup rule, etc.) are removed.
+7. For cleanup, Scrubarr fetches the full movie library via `/library/sections/{key}/all?type=1` and the full show library via `type=2`, including watch state (`viewCount`, `lastViewedAt`) and ratings (`rating`, `userRating`, `audienceRating`).
+8. Each item is evaluated against the loaded `CleanupRule` set. Exception rules carve out protected items; eligibility rules nominate them. Items in the cleanup ignore list are never candidates.
+9. The same library snapshot is reused across requests until a manual refresh (`POST /api/cleanup/refresh`) or the 12-second polling interval expires.
 
 Deletions use the Plex API endpoint `DELETE /library/metadata/{ratingKey}/media/{mediaId}` (per-version, dedupe) or `DELETE /library/metadata/{ratingKey}` (whole title, cleanup). This removes the metadata and the files from disk (Plex must have "Empty trash automatically after every scan" enabled, or you can call refresh manually).
 
@@ -165,9 +386,13 @@ In Plex Web, click any item, open the three-dot menu, choose "Get Info", click "
 
 ## Rules
 
-Rules are evaluated in priority order (lower number first). The first matching rule sets the recommended action for a duplicate item.
+Scrubarr has two independent rule engines. **Dedupe rules** annotate items in the duplicate list with a recommended "keep this" version; **Cleanup rules** mark whole items as candidates for deletion (or protect them from being marked). The schemas are different and the engines run on different data.
 
-### Match fields
+### Dedupe rules
+
+Dedupe rules are evaluated in priority order (lower number first). The first matching rule sets the recommended action for a duplicate item. Dedupe rules **never auto-delete** — they only annotate a `recommended` version on each duplicate item. To act on the annotation, click **Go with recommendation** on the row, or use the rule-process flow described above.
+
+#### Match fields
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -178,7 +403,7 @@ Rules are evaluated in priority order (lower number first). The first matching r
 | `collections` | string[] | Any-of match against Plex collection memberships |
 | `studios` | string[] | Any-of match against studio |
 
-### Action kinds
+#### Action kinds
 
 | Kind | Value | Effect |
 |---|---|---|
@@ -188,7 +413,7 @@ Rules are evaluated in priority order (lower number first). The first matching r
 | `mark_review` | (none) | Just flag the item with the rule name in the UI |
 | `ignore` | (none) | Hide the item from the duplicate list |
 
-### Example: keep 4K for the Marvel Cinematic Universe
+#### Example: keep 4K for the Marvel Cinematic Universe
 
 ```json
 {
@@ -200,7 +425,7 @@ Rules are evaluated in priority order (lower number first). The first matching r
 }
 ```
 
-### Example: keep 1080p for older catalog
+#### Example: keep 1080p for older catalog
 
 ```json
 {
@@ -212,7 +437,7 @@ Rules are evaluated in priority order (lower number first). The first matching r
 }
 ```
 
-### Example: auto-ignore subbed anime before 2010
+#### Example: auto-ignore subbed anime before 2010
 
 ```json
 {
@@ -224,9 +449,15 @@ Rules are evaluated in priority order (lower number first). The first matching r
 }
 ```
 
+### Cleanup rules
+
+Cleanup rule schema (match clauses, eligibility conditions, exception vs eligibility kinds, default seeded rules) is documented in the **Cleanup module** section above. The endpoint is `/api/cleanup/rules` and the data model is `CleanupRule` rather than the dedupe `Rule`.
+
 ## API
 
-All endpoints return JSON. The API is meant for the bundled UI but is fully usable from scripts.
+All endpoints return JSON unless noted. The API is meant for the bundled UI but is fully usable from scripts.
+
+### Dedupe
 
 | Endpoint | Method | Purpose |
 |---|---|---|
@@ -235,15 +466,42 @@ All endpoints return JSON. The API is meant for the bundled UI but is fully usab
 | `/api/dupes/{ratingKey}/media/{mediaId}` | DELETE | Delete a single Media version |
 | `/api/ignore` | GET / POST / DELETE | List, add, or remove ignored items (dedupe) |
 | `/api/rules` | GET / POST / DELETE | List, upsert, or delete dedupe rules |
-| `/api/cleanup` | GET | Cleanup candidates plus protected items |
+
+### Cleanup
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/cleanup/candidates` | GET | `scope=movie\|show`, returns the full annotated library plus `isCandidate` per row |
+| `/api/cleanup/refresh` | POST | Trigger a Plex re-fetch for the cleanup snapshot |
 | `/api/cleanup/rules` | GET / POST / DELETE | List, upsert, or delete cleanup rules |
+| `/api/cleanup/delete` | POST | Per-item delete plus a `DeletionLog` row |
 | `/api/cleanup/ignore` | GET / POST / DELETE | List, add, or remove ignored cleanup items |
-| `/api/series-preference` | GET / POST / DELETE | List, upsert, or delete per-series preferences |
-| `/api/shows` | GET | Per-series summary with auto-clean counts |
-| `/api/shows/{ratingKey}/auto-clean` | POST | Run auto-clean on one show |
-| `/api/shows/bulk-clean` | POST | Bulk auto-clean across many shows |
+
+### Shows and series preferences
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/shows` | GET | Per-series summary; re-applies preferences on every call |
+| `/api/shows/{ratingKey}/auto-clean` | POST | NDJSON stream of progress events for one show |
+| `/api/shows/bulk-clean` | POST | Multi-show NDJSON bulk-clean (Keep 1080p backend) |
+| `/api/series-preference` | GET / POST / DELETE | Per-show preferred resolution, codec, and REMUX flag |
+
+### Metadata and assets
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/thumb/{ratingKey}` | GET | Server-side Plex thumb proxy (poster) |
+| `/api/thumb/{ratingKey}/art` | GET | Server-side Plex art proxy (backdrop) |
+| `/api/metadata/{ratingKey}` | GET | Slim Plex metadata payload for the info modal |
+
+### Operations
+
+| Endpoint | Method | Purpose |
+|---|---|---|
 | `/api/log` | GET | Paginated deletion log with totals |
 | `/api/health` | GET | Liveness probe |
+
+`/api/shows/{ratingKey}/auto-clean` and `/api/shows/bulk-clean` emit NDJSON with `{ type: 'start' | 'progress' | 'done' }` events that the UI streams progress from. Rule-process endpoints under both modules use the same NDJSON shape.
 
 ## Development
 
@@ -259,3 +517,7 @@ Stack: Next.js 14 App Router, TypeScript, Tailwind, Prisma, SQLite. Single-proce
 ## License
 
 MIT.
+
+---
+
+For contributors: the internal architecture write-up lives at `/opt/mangavault/docs/SCRUBARR.md` on the deployment host. It covers data flow, the Plex client wrapper, the rule evaluator, and the cache layer in more detail than this README.
