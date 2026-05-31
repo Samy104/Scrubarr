@@ -21,6 +21,12 @@ services:
       - ./config/.env
     volumes:
       - ./config:/db
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
 networks:
   cloudbox:
